@@ -1,6 +1,6 @@
 use std::io::{BufRead, Write};
 
-use crate::{lexer::lexer::Lexer, token::token::{Source, TokenKind}};
+use crate::interpreter::{lexer::Lexer, token::{Source, TokenKind}};
 
 pub fn start<R: BufRead, W: Write>(input: R, mut output: W) {
     write_flush(&mut output, b">> ");

@@ -1,6 +1,6 @@
 use std::{char, iter::Peekable, str::CharIndices};
 
-use crate::token::token::{Source, Token, TokenKind, Keyword};
+use crate::interpreter::token::{Source, Token, TokenKind, Keyword};
 
 macro_rules! token {
     ($data: ident, $kind: expr) => {
@@ -145,7 +145,7 @@ impl<'a> Lexer<'a> {
 
 #[cfg(test)]
 mod test {
-    use crate::token::token::{TokenKind, Source, Keyword};
+    use crate::interpreter::token::{TokenKind, Source, Keyword};
 
     use super::Lexer;
 
