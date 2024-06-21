@@ -1,6 +1,6 @@
 use std::{char, iter::Peekable, str::CharIndices};
 
-use crate::interpreter::token::{Source, Token, TokenKind, Keyword};
+use crate::interpreter::token::{Keyword, Source, Token, TokenKind};
 
 macro_rules! token {
     ($data: ident, $kind: expr) => {
@@ -14,14 +14,21 @@ pub struct Lexer<'a> {
     ch: Option<(usize, char)>,
     source: Source,
     line: usize,
-    column: usize
+    column: usize,
 }
 
 impl<'a> Lexer<'a> {
     pub fn new(input: &'a str, source: Source) -> Self {
         let mut chars = input.char_indices().peekable();
         let ch = chars.next();
-        let lexer = Lexer { input, chars, ch, source, line: 1, column: 1 };
+        let lexer = Lexer {
+            input,
+            chars,
+            ch,
+            source,
+            line: 1,
+            column: 1,
+        };
         lexer
     }
 
@@ -29,7 +36,7 @@ impl<'a> Lexer<'a> {
         self.column += 1;
         self.ch = self.chars.next();
     }
-    
+
     pub fn next_token(&mut self) -> Token {
         let tok: Token;
         self.skip_white_space();
@@ -43,7 +50,7 @@ impl<'a> Lexer<'a> {
                 } else {
                     tok = token!(x, TokenKind::Assign)
                 }
-            },
+            }
             Some((_, '!')) => {
                 if self.peek_char() == Some('=') {
                     self.read_char();
@@ -51,7 +58,7 @@ impl<'a> Lexer<'a> {
                 } else {
                     tok = token!(x, TokenKind::Bang)
                 }
-            },
+            }
             Some((_, ';')) => tok = token!(x, TokenKind::Semicolon),
             Some((_, '/')) => tok = token!(x, TokenKind::Slash),
             Some((_, '*')) => tok = token!(x, TokenKind::Asterisk),
@@ -80,7 +87,7 @@ impl<'a> Lexer<'a> {
                             "if" => token!(x, TokenKind::Key(Keyword::If)),
                             "else" => token!(x, TokenKind::Key(Keyword::Else)),
                             "return" => token!(x, TokenKind::Key(Keyword::Return)),
-                            _ => token!(x, TokenKind::Identifier(String::from(ss)))
+                            _ => token!(x, TokenKind::Identifier(String::from(ss))),
                         };
                         return tok;
                     }
@@ -88,7 +95,7 @@ impl<'a> Lexer<'a> {
                 } else {
                     tok = token!(x, TokenKind::Illegal);
                 }
-            },
+            }
             None => tok = token!(x, TokenKind::EOF),
         }
 
@@ -106,7 +113,7 @@ impl<'a> Lexer<'a> {
 
     fn read<F>(&mut self, check: F) -> Option<&str>
     where
-    F: Fn(char) -> bool
+        F: Fn(char) -> bool,
     {
         let start = self.ch?.0;
 
@@ -129,7 +136,11 @@ impl<'a> Lexer<'a> {
     fn skip_white_space(&mut self) {
         let mut ch;
         loop {
-            ch = if self.ch.is_some() { self.ch.unwrap().1 } else { return; };
+            ch = if self.ch.is_some() {
+                self.ch.unwrap().1
+            } else {
+                return;
+            };
             if ch == '\n' {
                 self.read_char();
                 self.line += 1;
@@ -145,7 +156,7 @@ impl<'a> Lexer<'a> {
 
 #[cfg(test)]
 mod test {
-    use crate::interpreter::token::{TokenKind, Source, Keyword};
+    use crate::interpreter::token::{Keyword, Source, TokenKind};
 
     use super::Lexer;
 
@@ -245,7 +256,7 @@ mod test {
             TokenKind::NotEQ,
             TokenKind::Int(9),
             TokenKind::Semicolon,
-            TokenKind::EOF
+            TokenKind::EOF,
         ];
 
         let mut l = Lexer::new(input, Source::REPL);

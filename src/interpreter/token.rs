@@ -3,19 +3,40 @@ pub struct Token {
     pub kind: TokenKind,
     line: usize,
     column: usize,
-    source: Source
+    source: Source,
 }
 
 impl Token {
     pub fn new(kind: TokenKind, line: usize, column: usize, source: Source) -> Self {
-        Token { kind, line, column, source }
+        Token {
+            kind,
+            line,
+            column,
+            source,
+        }
+    }
+
+    pub fn illegal() -> Self {
+        Token {
+            kind: TokenKind::Illegal,
+            line: 0,
+            column: 0,
+            source: Source::REPL,
+        }
+    }
+
+    pub fn ident(&self) -> Option<String> {
+        match &self.kind {
+            TokenKind::Identifier(s) => Some(s.clone()),
+            _ => None,
+        }
     }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Source {
     File(String),
-    REPL
+    REPL,
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
@@ -40,7 +61,7 @@ pub enum TokenKind {
     RParen,
     LBrace,
     RBrace,
-    Key(Keyword)
+    Key(Keyword),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
@@ -51,5 +72,5 @@ pub enum Keyword {
     False,
     If,
     Else,
-    Return
+    Return,
 }

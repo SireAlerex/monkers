@@ -1,6 +1,9 @@
 use std::io::{BufRead, Write};
 
-use crate::interpreter::{lexer::Lexer, token::{Source, TokenKind}};
+use crate::interpreter::{
+    lexer::Lexer,
+    token::{Source, TokenKind},
+};
 
 pub fn start<R: BufRead, W: Write>(input: R, mut output: W) {
     write_flush(&mut output, b">> ");
@@ -12,7 +15,7 @@ pub fn start<R: BufRead, W: Write>(input: R, mut output: W) {
                 if token.kind == TokenKind::EOF {
                     break;
                 }
-                println!("{token:?}");                
+                println!("{token:?}");
             }
             write_flush(&mut output, b">> ");
         }
