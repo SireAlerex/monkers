@@ -21,7 +21,7 @@ impl Token {
             kind: TokenKind::Illegal,
             line: 0,
             column: 0,
-            source: Source::REPL,
+            source: Source::Repl,
         }
     }
 
@@ -36,7 +36,7 @@ impl Token {
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Source {
     File(String),
-    REPL,
+    Repl,
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash)]

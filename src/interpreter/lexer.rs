@@ -75,6 +75,7 @@ impl<'a> Lexer<'a> {
                     if let Some(int) = self.read_number() {
                         return token!(x, TokenKind::Int(int));
                     }
+                    println!("illegal token from read_number");
                     tok = token!(x, TokenKind::Illegal);
                 } else if Self::is_letter(s) {
                     if let Some(ss) = self.read_ident() {
@@ -91,8 +92,10 @@ impl<'a> Lexer<'a> {
                         return tok;
                     }
                     tok = token!(x, TokenKind::Illegal);
+                    println!("illegal token from read_ident");
                 } else {
                     tok = token!(x, TokenKind::Illegal);
+                    println!("illegal token from char");
                 }
             }
             None => tok = token!(x, TokenKind::EOF),
@@ -110,17 +113,30 @@ impl<'a> Lexer<'a> {
         ch.is_alphabetic() || ch == '_'
     }
 
-    fn read<F>(&mut self, check: F) -> Option<&str>
+    fn read<F>(&mut self, mut check: F) -> Option<&str>
     where
         F: Fn(char) -> bool,
     {
         let start = self.ch?.0;
+        let mut end = start;
 
-        while check(self.ch?.1) {
+        while self.read_check(&mut check) {
             self.read_char();
+            end += 1;
         }
-        let s = self.input.get(start..self.ch?.0)?;
+        let s = self.input.get(start..end)?;
         Some(s)
+    }
+
+    fn read_check<F>(&self, check: &mut F) -> bool
+    where
+        F: Fn(char) -> bool,
+    {
+        if let Some((_, c)) = self.ch {
+            check(c)
+        } else {
+            false
+        }
     }
 
     fn read_ident(&mut self) -> Option<&str> {
@@ -258,7 +274,7 @@ mod test {
             TokenKind::EOF,
         ];
 
-        let mut l = Lexer::new(input, Source::REPL);
+        let mut l = Lexer::new(input, Source::Repl);
 
         for i in 0..expected_tokens.len() {
             let tok = l.next_token();

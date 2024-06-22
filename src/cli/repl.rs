@@ -8,7 +8,7 @@ use crate::interpreter::{
 pub fn start<R: BufRead, W: Write>(input: R, mut output: W) {
     write_flush(&mut output, b">> ");
     for line in input.lines().map_while(Result::ok) {
-        let mut lexer = Lexer::new(&line, Source::REPL);
+        let mut lexer = Lexer::new(&line, Source::Repl);
         loop {
             let token = lexer.next_token();
             if token.kind == TokenKind::EOF {
