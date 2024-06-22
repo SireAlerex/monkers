@@ -39,12 +39,12 @@ pub enum Source {
     REPL,
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash)]
 pub enum TokenKind {
     Illegal,
     EOF,
     Identifier(String),
-    Int(u64),
+    Int(i64),
     Assign,
     Plus,
     Minus,
@@ -64,7 +64,7 @@ pub enum TokenKind {
     Key(Keyword),
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Hash)]
 pub enum Keyword {
     Function,
     Let,

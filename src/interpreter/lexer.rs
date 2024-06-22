@@ -21,15 +21,14 @@ impl<'a> Lexer<'a> {
     pub fn new(input: &'a str, source: Source) -> Self {
         let mut chars = input.char_indices().peekable();
         let ch = chars.next();
-        let lexer = Lexer {
+        Lexer {
             input,
             chars,
             ch,
             source,
             line: 1,
             column: 1,
-        };
-        lexer
+        }
     }
 
     fn read_char(&mut self) {
@@ -100,7 +99,7 @@ impl<'a> Lexer<'a> {
         }
 
         self.read_char();
-        return tok;
+        tok
     }
 
     fn peek_char(&mut self) -> Option<char> {
@@ -128,9 +127,9 @@ impl<'a> Lexer<'a> {
         self.read(Self::is_letter)
     }
 
-    fn read_number(&mut self) -> Option<u64> {
+    fn read_number(&mut self) -> Option<i64> {
         let s = self.read(|ch| ch.is_ascii_digit())?;
-        u64::from_str_radix(s, 10).ok()
+        s.parse::<i64>().ok()
     }
 
     fn skip_white_space(&mut self) {
