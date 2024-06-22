@@ -2,7 +2,10 @@ use std::fmt::Display;
 
 use super::parser::Parser;
 
-pub struct Program(pub Vec<Stmt>);
+pub type Program = Block;
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct Block(pub Vec<Stmt>);
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Stmt {
@@ -15,12 +18,24 @@ pub type Ident = String;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Expr {
-    //TODO: remove
-    Temp,
     Ident(Ident),
     IntLiteral(i64),
+    BooleanLiteral(bool),
     Prefix(Operator, Box<Expr>),
     Infix(Box<Expr>, Operator, Box<Expr>),
+    If {
+        cond: Box<Expr>,
+        consequence: Block,
+        alternative: Option<Block>,
+    },
+    FunctionLiteral {
+        parameters: Vec<Ident>,
+        body: Block,
+    },
+    Call {
+        function: Box<Expr>,
+        arguments: Vec<Expr>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -43,7 +58,7 @@ impl Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = String::new();
         for stmt in &self.0 {
-            s.push_str(&(stmt.to_string() + "\n"))
+            s.push_str(&format!("{stmt}\n"))
         }
         f.write_str(&s)
     }
@@ -63,11 +78,39 @@ impl Display for Stmt {
 impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
-            Self::Temp => "temp".to_string(),
             Self::Ident(ident) => ident.clone(),
             Self::IntLiteral(int) => int.to_string(),
+            Self::BooleanLiteral(bool) => bool.to_string(),
             Self::Prefix(op, expr) => format!("({op}{expr})"),
             Self::Infix(left, op, right) => format!("({left} {op} {right})"),
+            Self::If {
+                cond,
+                consequence,
+                alternative,
+            } => {
+                let s = format!("if {cond} {{\n\t{consequence}\n}}");
+                if let Some(block) = alternative {
+                    format!("{s} else {{\n\t{block}\n}}")
+                } else {
+                    s
+                }
+            }
+            Self::FunctionLiteral { parameters, body } => {
+                format!("fn ({}) {{ {} }}", parameters.join(","), body)
+            }
+            Self::Call {
+                function,
+                arguments,
+            } => {
+                format!(
+                    "{function}({})",
+                    (*arguments)
+                        .iter()
+                        .map(|expr| expr.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                )
+            }
         };
         f.write_str(&s)
     }
@@ -92,20 +135,22 @@ impl Display for Operator {
 
 #[cfg(test)]
 mod test {
-    use super::{Expr, Program, Stmt};
+    use crate::interpreter::ast::Block;
+
+    use super::{Expr, Stmt};
 
     #[test]
     fn program_print() {
-        let program = Program(vec![
+        let program = Block(vec![
             Stmt::Let("myVar".to_owned(), Expr::Ident("otherVar".to_owned())),
             Stmt::Return(Expr::Ident("result".to_owned())),
         ]);
 
         let expected_str = "\
-        let myVar = otherVar;\n\
-        return result;\n\
+        let myVar = otherVar;\
+        return result;\
         ";
 
-        assert_eq!(program.to_string(), expected_str);
+        assert_eq!(program.to_string().replace('\n', ""), expected_str);
     }
 }
