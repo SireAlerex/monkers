@@ -6,9 +6,9 @@ use object::{error, null, Object};
 
 use super::ast::{Block, Expr, Operator, Program, Stmt};
 
+pub mod builtin;
 pub mod env;
 pub mod object;
-pub mod builtin;
 
 macro_rules! check {
     ($obj: ident) => {
@@ -106,7 +106,9 @@ impl Evaluator {
                     error!("identifier not found: {name}")
                 }
             }
-            Expr::FunctionLiteral { parameters, body } => Object::function(parameters, body, Rc::clone(&self.env)),
+            Expr::FunctionLiteral { parameters, body } => {
+                Object::function(parameters, body, Rc::clone(&self.env))
+            }
             Expr::Call {
                 function,
                 arguments,
@@ -114,14 +116,31 @@ impl Evaluator {
                 let function = self.eval_expr(*function);
                 check!(function);
 
-                let args = self.eval_args(&arguments);
-                if args.len() == 1 && args.first().unwrap().is_error() {
-                    return args.first().unwrap().clone();
+                let args = self.eval_expr_list(&arguments);
+                if args.len() == 1 {
+                    let first = args.first().unwrap().clone();
+                    check!(first);
                 }
-
                 self.apply_function(function, args)
             }
             Expr::StringLiteral(s) => Object::String(s),
+            Expr::Array(array) => {
+                let elements = self.eval_expr_list(&array);
+                if elements.len() == 1 {
+                    let first = elements.first().unwrap().clone();
+                    check!(first);
+                }
+                Object::Array(elements)
+            }
+            Expr::Index(left, index) => {
+                let left = self.eval_expr(*left);
+                check!(left);
+
+                let index = self.eval_expr(*index);
+                check!(index);
+
+                left.get(&index)
+            }
         }
     }
 
@@ -137,10 +156,8 @@ impl Evaluator {
 
                 Self::unwrap_return(evaluated)
             }
-            Object::Builtin(builtin) => {
-                builtin(args)
-            }
-            _ => error!("not a function : {}", function.get_type())
+            Object::Builtin(builtin) => builtin(args),
+            _ => error!("not a function : {}", function.get_type()),
         }
     }
 
@@ -169,7 +186,7 @@ impl Evaluator {
         }
     }
 
-    fn eval_args(&mut self, expressions: &[Expr]) -> Vec<Object> {
+    fn eval_expr_list(&mut self, expressions: &[Expr]) -> Vec<Object> {
         let mut result = Vec::new();
 
         for expr in expressions {
@@ -228,7 +245,10 @@ mod test {
         token::Source,
     };
 
-    use super::{env::Environment, object::{Function, Object}};
+    use super::{
+        env::Environment,
+        object::{Function, Object},
+    };
 
     fn check_tests(tests: &[(&str, Object)]) {
         for test in tests {
@@ -245,13 +265,87 @@ mod test {
     }
 
     #[test]
+    fn array_test() {
+        check_tests(&[
+            (
+                "[1, 2 * 2, 3 + 3]",
+                Object::Array(vec![
+                    Object::Integer(1),
+                    Object::Integer(4),
+                    Object::Integer(6),
+                ]),
+            ),
+            ("[1, 2, 3][0]", Object::Integer(1)),
+            ("[1, 2, 3][1]", Object::Integer(2)),
+            ("[1, 2, 3][2]", Object::Integer(3)),
+            ("let i = 0; [1][i];", Object::Integer(1)),
+            ("[1, 2, 3][1 + 1];", Object::Integer(3)),
+            ("let myArray = [1, 2, 3]; myArray[2];", Object::Integer(3)),
+            (
+                "let myArray = [1, 2, 3]; myArray[0] + myArray[1] + myArray[2];",
+                Object::Integer(6),
+            ),
+            (
+                "let myArray = [1, 2, 3]; let i = myArray[0]; myArray[i];",
+                Object::Integer(2),
+            ),
+            ("[1, 2, 3][3]", Object::Null),
+            ("[1, 2, 3][-1]", Object::Null),
+        ]);
+    }
+
+    #[test]
     fn builtin_test() {
         let tests = [
             ("len(\"\")", Object::Integer(0)),
             ("len(\"four\")", Object::Integer(4)),
             ("len(\"hello world\")", Object::Integer(11)),
-            ("len(1)", Object::Error("argument to 'len' not supported, got INTEGER".to_owned())),
-            ("len(\"one\", \"two\")", Object::Error("wrong number of arguments. got=2, want=1".to_owned())),
+            (
+                "len(1)",
+                Object::Error("argument to 'len' not supported, got INTEGER".to_owned()),
+            ),
+            (
+                "len(\"one\", \"two\")",
+                Object::Error("wrong number of arguments. got=2, want=1".to_owned()),
+            ),
+            (
+                "   let map = fn(arr, f) {
+                        let iter = fn(arr, accumulated) {
+                            if (len(arr) == 0) {
+                                accumulated
+                            } else {
+                                iter(rest(arr), push(accumulated, f(first(arr))));
+                            }
+                        };
+                        iter(arr, []);
+                    };
+                    let a = [1, 2, 3, 4];
+                    let double = fn(x) { x * 2};
+                    map(a, double);",
+                Object::Array(vec![
+                    Object::Integer(2),
+                    Object::Integer(4),
+                    Object::Integer(6),
+                    Object::Integer(8),
+                ]),
+            ),
+            (
+                "   let reduce = fn(arr, initial, f) {
+                        let iter = fn(arr, result) {
+                            if (len(arr) == 0) {
+                                result
+                            } else {
+                                iter(rest(arr), f(result, first(arr)));
+                            }
+                        };
+                    iter(arr, initial);
+                    };
+                    let sum = fn(arr) {
+                        reduce(arr, 0, fn(initial, el) { initial + el });
+                    };
+                    sum([1, 2, 3, 4, 5])",
+                Object::Integer(15),
+            ),
         ];
 
         check_tests(&tests);

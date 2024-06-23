@@ -32,6 +32,7 @@ enum Precedence {
     Product,
     Prefix,
     Call,
+    Index,
 }
 
 pub struct Parser<'a> {
@@ -54,6 +55,7 @@ fn precedence(kind: &TokenKind) -> Precedence {
         TokenKind::Slash => Precedence::Product,
         TokenKind::Asterisk => Precedence::Product,
         TokenKind::LParen => Precedence::Call,
+        TokenKind::LBracket => Precedence::Index,
         _ => Precedence::Lowest,
     }
 }
@@ -123,7 +125,7 @@ fn parse_paren(parser: &mut Parser) -> Expr {
         .parse_expression(Precedence::Lowest)
         .expect("parse gouped expr error");
 
-    if !parser.expect_peek(TokenKind::RParen) {
+    if !parser.expect_peek(&TokenKind::RParen) {
         panic!("paren no RParen");
     }
 
@@ -138,7 +140,7 @@ fn parse_if(parser: &mut Parser) -> Expr {
             .expect("parse if bad cond"),
     );
 
-    if !parser.expect_peek(TokenKind::LBrace) {
+    if !parser.expect_peek(&TokenKind::LBrace) {
         panic!("if no LBrace");
     }
 
@@ -147,7 +149,7 @@ fn parse_if(parser: &mut Parser) -> Expr {
     let alternative = if parser.peek_token_is(&TokenKind::Key(Keyword::Else)) {
         parser.next_token();
 
-        if !parser.expect_peek(TokenKind::LBrace) {
+        if !parser.expect_peek(&TokenKind::LBrace) {
             panic!("else no LBrace");
         }
 
@@ -164,13 +166,13 @@ fn parse_if(parser: &mut Parser) -> Expr {
 }
 
 fn parse_fn(parser: &mut Parser) -> Expr {
-    if !parser.expect_peek(TokenKind::LParen) {
+    if !parser.expect_peek(&TokenKind::LParen) {
         panic!("fn no LParen");
     }
 
     let parameters = parser.parse_parameters();
 
-    if !parser.expect_peek(TokenKind::LBrace) {
+    if !parser.expect_peek(&TokenKind::LBrace) {
         panic!("fn no LBrace");
     }
 
@@ -193,6 +195,25 @@ fn parse_string(parser: &mut Parser) -> Expr {
         Expr::StringLiteral(s.to_owned())
     } else {
         panic!("should never happen")
+    }
+}
+
+fn parse_array(parser: &mut Parser) -> Expr {
+    let elements = parser.parse_expr_list(&TokenKind::RBracket);
+
+    Expr::Array(elements)
+}
+
+fn parse_index(parser: &mut Parser, left: Expr) -> Expr {
+    parser.next_token();
+    if let Some(index) = parser.parse_expression(Precedence::Lowest) {
+        if !parser.expect_peek(&TokenKind::RBracket) {
+            panic!("should never happen");
+        }
+
+        Expr::Index(Box::new(left), Box::new(index))
+    } else {
+        panic!("no index should never happen");
     }
 }
 
@@ -233,6 +254,7 @@ impl<'a, 'b> Parser<'a> {
         parser.prefix_fns.insert(TokenKind::Bang, parse_prefix);
         parser.prefix_fns.insert(TokenKind::Minus, parse_prefix);
         parser.prefix_fns.insert(TokenKind::LParen, parse_paren);
+        parser.prefix_fns.insert(TokenKind::LBracket, parse_array);
 
         // Infix functions
         parser.infix_fns.insert(TokenKind::Plus, parse_infix);
@@ -244,6 +266,7 @@ impl<'a, 'b> Parser<'a> {
         parser.infix_fns.insert(TokenKind::EQ, parse_infix);
         parser.infix_fns.insert(TokenKind::NotEQ, parse_infix);
         parser.infix_fns.insert(TokenKind::LParen, parse_call);
+        parser.infix_fns.insert(TokenKind::LBracket, parse_index);
 
         parser.next_token();
         parser.next_token();
@@ -342,7 +365,7 @@ impl<'a, 'b> Parser<'a> {
 
         let name: Ident = Token::ident(&self.cur_token)?;
 
-        if !self.expect_peek(TokenKind::Assign) {
+        if !self.expect_peek(&TokenKind::Assign) {
             return None;
         }
 
@@ -376,8 +399,8 @@ impl<'a, 'b> Parser<'a> {
         self.peek_token.kind == *kind
     }
 
-    fn expect_peek(&mut self, kind: TokenKind) -> bool {
-        if self.peek_token_is(&kind) {
+    fn expect_peek(&mut self, kind: &TokenKind) -> bool {
+        if self.peek_token_is(kind) {
             self.next_token();
             true
         } else {
@@ -386,7 +409,7 @@ impl<'a, 'b> Parser<'a> {
         }
     }
 
-    fn peek_error(&mut self, kind: TokenKind) {
+    fn peek_error(&mut self, kind: &TokenKind) {
         self.errors.push(format!(
             "expected next token to be {kind:?}, got {:?} instead",
             self.peek_token.kind
@@ -411,6 +434,35 @@ impl<'a, 'b> Parser<'a> {
         precedence(&self.cur_token.kind)
     }
 
+    fn parse_expr_list(&mut self, end: &TokenKind) -> Vec<Expr> {
+        let mut list = Vec::new();
+
+        if self.peek_token_is(end) {
+            self.next_token();
+            return list;
+        }
+
+        self.next_token();
+        if let Some(expr) = self.parse_expression(Precedence::Lowest) {
+            list.push(expr);
+        }
+
+        while self.peek_token_is(&TokenKind::Comma) {
+            self.next_token();
+            self.next_token();
+
+            if let Some(expr) = self.parse_expression(Precedence::Lowest) {
+                list.push(expr);
+            }
+        }
+
+        if !self.expect_peek(end) {
+            //TODO: deal with error
+        }
+
+        list
+    }
+
     fn parse_parameters(&mut self) -> Vec<Ident> {
         let mut parameters = Vec::new();
 
@@ -433,7 +485,7 @@ impl<'a, 'b> Parser<'a> {
             }
         }
 
-        if !self.expect_peek(TokenKind::RParen) {
+        if !self.expect_peek(&TokenKind::RParen) {
             //TODO: deal with error
         }
 
@@ -441,34 +493,7 @@ impl<'a, 'b> Parser<'a> {
     }
 
     fn parse_arguments(&mut self) -> Vec<Expr> {
-        let mut arguments = Vec::new();
-
-        if self.peek_token_is(&TokenKind::RParen) {
-            self.next_token();
-            return arguments;
-        }
-
-        self.next_token();
-        arguments.push(
-            self.parse_expression(Precedence::Lowest)
-                .expect("parse args expr none"),
-        );
-
-        while self.peek_token_is(&TokenKind::Comma) {
-            self.next_token();
-            self.next_token();
-
-            arguments.push(
-                self.parse_expression(Precedence::Lowest)
-                    .expect("parse args expr none"),
-            );
-        }
-
-        if !self.expect_peek(TokenKind::RParen) {
-            //TODO: deal with error
-        }
-
-        arguments
+        self.parse_expr_list(&TokenKind::RParen)
     }
 
     pub fn errors(&self) -> &Vec<String> {
@@ -506,9 +531,43 @@ mod test {
             let program = parser.parse_program();
 
             assert!(check_parser_errors(parser));
+            println!("program: {:?}", program.0);
             assert_eq!(program.0.len(), 1);
             assert_eq!(program.0.first().unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn array_test() {
+        check_tests(&[
+            (
+                "[1, 2 * 2, 3 + 3]",
+                Stmt::Expr(Expr::Array(vec![
+                    Expr::IntLiteral(1),
+                    Expr::Infix(
+                        Box::new(Expr::IntLiteral(2)),
+                        Operator::Asterisk,
+                        Box::new(Expr::IntLiteral(2)),
+                    ),
+                    Expr::Infix(
+                        Box::new(Expr::IntLiteral(3)),
+                        Operator::Plus,
+                        Box::new(Expr::IntLiteral(3)),
+                    ),
+                ])),
+            ),
+            (
+                "myArray[2+1]",
+                Stmt::Expr(Expr::Index(
+                    Box::new(Expr::Ident("myArray".to_string())),
+                    Box::new(Expr::Infix(
+                        Box::new(Expr::IntLiteral(2)),
+                        Operator::Plus,
+                        Box::new(Expr::IntLiteral(1)),
+                    )),
+                )),
+            ),
+        ]);
     }
 
     #[test]
@@ -681,6 +740,14 @@ mod test {
             (
                 "add(a + b + c * d / f + g)",
                 "add((((a + b) + ((c * d) / f)) + g))",
+            ),
+            (
+                "a * [1, 2, 3, 4][b * c] * d",
+                "((a * ([1, 2, 3, 4][(b * c)])) * d)",
+            ),
+            (
+                "add(a * b[2], b[1], 2 * [1, 2][1])",
+                "add((a * (b[2])), (b[1]), (2 * ([1, 2][1])))",
             ),
         ];
 

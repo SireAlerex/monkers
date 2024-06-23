@@ -5,7 +5,10 @@ use std::{
     rc::Rc,
 };
 
-use crate::interpreter::ast::{Block, Ident};
+use crate::{
+    interpreter::ast::{Block, Ident},
+    utils,
+};
 
 use super::{builtin::BuiltinFunction, env::Environment};
 
@@ -25,7 +28,7 @@ macro_rules! int_op {
     ($trait: tt, $func: tt, $op: tt, $op_str: literal) => {
         impl $trait<Object> for Object {
             type Output = Object;
-        
+
             fn $func(self, rhs: Object) -> Self::Output {
                 match (self, rhs) {
                     (Object::Integer(a), Object::Integer(b)) => Object::Integer(a $op b),
@@ -33,7 +36,7 @@ macro_rules! int_op {
                 }
             }
         }
-        
+
     };
 }
 
@@ -45,11 +48,12 @@ pub enum Object {
     Integer(i64),
     Boolean(bool),
     String(String),
+    Array(Vec<Object>),
     Returned(Box<Object>),
     Null,
     Error(String),
     Function(Function),
-    Builtin(BuiltinFunction)
+    Builtin(BuiltinFunction),
 }
 
 impl Add<Object> for Object {
@@ -71,6 +75,32 @@ int_op!(Div, div, /, "/");
 impl Object {
     pub fn function(parameters: Vec<Ident>, body: Block, env: Rc<RefCell<Environment>>) -> Self {
         Object::Function(Function::new(parameters, body, env))
+    }
+
+    pub fn get(&self, index: &Object) -> Object {
+        match (self, index) {
+            (Object::Array(array), Object::Integer(i)) => {
+                if *i < 0 {
+                    return null!();
+                }
+                match TryInto::<usize>::try_into(*i) {
+                    Ok(idx) => {
+                        if idx >= array.len() {
+                            return null!();
+                        }
+                        println!("idx:{idx} max:{}", array.len());
+
+                        array[idx].clone()
+                    }
+                    Err(err) => error!("size can't be a 64bit integer ({err})"),
+                }
+            }
+            (_, _) => error!(
+                "index operation not supported: {}[{}]",
+                self.get_type(),
+                index.get_type()
+            ),
+        }
     }
 
     pub(crate) fn less(self, right: Object) -> Object {
@@ -118,6 +148,7 @@ impl Object {
             Object::Integer(_) => String::from("INTEGER"),
             Object::Boolean(_) => String::from("BOOLEAN"),
             Object::String(_) => String::from("STRING"),
+            Object::Array(_) => String::from("ARRAY"),
             Object::Returned(obj) => format!("RETURNED({})", obj.get_type()),
             Object::Null => String::from("NULL"),
             Object::Function { .. } => String::from("FUNCTION"),
@@ -137,6 +168,7 @@ impl Display for Object {
             Self::Integer(x) => write!(f, "{x}"),
             Self::Boolean(bool) => write!(f, "{bool}"),
             Self::String(s) => write!(f, "{s}"),
+            Self::Array(array) => write!(f, "{}", utils::join(array)),
             Self::Null => f.write_str("null"),
             Self::Returned(obj) => write!(f, "{obj}"),
             Self::Function(function) => write!(f, "{function}"),
@@ -155,18 +187,30 @@ pub struct Function {
 
 impl Function {
     pub fn new(parameters: Vec<Ident>, body: Block, env: Rc<RefCell<Environment>>) -> Self {
-        Function { parameters, body, env }
+        Function {
+            parameters,
+            body,
+            env,
+        }
     }
 }
 
 impl Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "fn({}) {{\n{}\n}}", self.parameters.join(", "), self.body)
+        write!(
+            f,
+            "fn({}) {{\n{}\n}}",
+            self.parameters.join(", "),
+            self.body
+        )
     }
 }
 
 impl Debug for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("Function").field("parameters", &self.parameters).field("body", &self.body).finish()
+        f.debug_struct("Function")
+            .field("parameters", &self.parameters)
+            .field("body", &self.body)
+            .finish()
     }
 }

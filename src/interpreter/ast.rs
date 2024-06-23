@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::utils;
+
 use super::parser::Parser;
 
 pub type Program = Block;
@@ -22,6 +24,8 @@ pub enum Expr {
     IntLiteral(i64),
     BooleanLiteral(bool),
     StringLiteral(String),
+    Array(Vec<Expr>),
+    Index(Box<Expr>, Box<Expr>),
     Prefix(Operator, Box<Expr>),
     Infix(Box<Expr>, Operator, Box<Expr>),
     If {
@@ -83,6 +87,8 @@ impl Display for Expr {
             Self::IntLiteral(int) => int.to_string(),
             Self::BooleanLiteral(bool) => bool.to_string(),
             Self::StringLiteral(s) => s.to_string(),
+            Self::Array(vec) => format!("[{}]", utils::join(vec)),
+            Self::Index(left, index) => format!("({left}[{index}])"),
             Self::Prefix(op, expr) => format!("({op}{expr})"),
             Self::Infix(left, op, right) => format!("({left} {op} {right})"),
             Self::If {
@@ -104,14 +110,7 @@ impl Display for Expr {
                 function,
                 arguments,
             } => {
-                format!(
-                    "{function}({})",
-                    (*arguments)
-                        .iter()
-                        .map(|expr| expr.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                )
+                format!("{function}({})", utils::join(arguments))
             }
         };
         f.write_str(&s)

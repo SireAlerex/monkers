@@ -69,6 +69,8 @@ impl<'a> Lexer<'a> {
             Some((_, '-')) => token!(data, TokenKind::Minus),
             Some((_, '{')) => token!(data, TokenKind::LBrace),
             Some((_, '}')) => token!(data, TokenKind::RBrace),
+            Some((_, '[')) => token!(data, TokenKind::LBracket),
+            Some((_, ']')) => token!(data, TokenKind::RBracket),
             Some((_, '"')) => {
                 if let Some(s) = self.read_string() {
                     token!(data, TokenKind::String(s))
@@ -213,6 +215,7 @@ mod test {
         \"foobar\"
         \"foo\\t bar\"
         \"foo\\nbar\"
+        [1, 2];
         ";
 
         let expected_tokens = [
@@ -292,6 +295,12 @@ mod test {
             TokenKind::String(String::from("foobar")),
             TokenKind::String(String::from("foo\t bar")),
             TokenKind::String(String::from("foo\nbar")),
+            TokenKind::LBracket,
+            TokenKind::Int(1),
+            TokenKind::Comma,
+            TokenKind::Int(2),
+            TokenKind::RBracket,
+            TokenKind::Semicolon,
             TokenKind::EOF,
         ];
 
@@ -299,13 +308,6 @@ mod test {
 
         for i in 0..expected_tokens.len() {
             let tok = l.next_token();
-
-            if let TokenKind::String(ref s0) = tok.kind {
-                eprintln!("got tok={s0}")
-            }
-            if let Some(TokenKind::String(s0)) = expected_tokens.get(i) {
-                eprintln!("expected={s0}")
-            }
             assert_eq!(&tok.kind, expected_tokens.get(i).unwrap());
         }
     }
