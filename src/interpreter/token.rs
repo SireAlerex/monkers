@@ -1,13 +1,15 @@
+use std::rc::Rc;
+
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Token {
     pub kind: TokenKind,
     line: usize,
     column: usize,
-    source: Source,
+    source: Rc<Source>,
 }
 
 impl Token {
-    pub fn new(kind: TokenKind, line: usize, column: usize, source: Source) -> Self {
+    pub fn new(kind: TokenKind, line: usize, column: usize, source: Rc<Source>) -> Self {
         Token {
             kind,
             line,
@@ -21,7 +23,7 @@ impl Token {
             kind: TokenKind::Illegal,
             line: 0,
             column: 0,
-            source: Source::Repl,
+            source: Rc::new(Source::Repl),
         }
     }
 
@@ -62,6 +64,7 @@ pub enum TokenKind {
     LBrace,
     RBrace,
     Key(Keyword),
+    String(String),
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, PartialOrd, Eq, Hash)]

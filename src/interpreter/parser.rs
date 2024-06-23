@@ -188,6 +188,14 @@ fn parse_call(parser: &mut Parser, function: Expr) -> Expr {
     }
 }
 
+fn parse_string(parser: &mut Parser) -> Expr {
+    if let TokenKind::String(ref s) = parser.cur_token.kind {
+        Expr::StringLiteral(s.to_owned())
+    } else {
+        panic!("should never happen")
+    }
+}
+
 // TODO: function to return None and add an error
 impl<'a, 'b> Parser<'a> {
     pub fn new(lexer: Lexer<'a>) -> Self {
@@ -204,6 +212,9 @@ impl<'a, 'b> Parser<'a> {
         parser
             .prefix_fns
             .insert(TokenKind::Identifier("_".to_owned()), parse_ident);
+        parser
+            .prefix_fns
+            .insert(TokenKind::String("_".to_owned()), parse_string);
         parser
             .prefix_fns
             .insert(TokenKind::Int(0), parse_int_literal);
@@ -387,6 +398,7 @@ impl<'a, 'b> Parser<'a> {
         match kind {
             TokenKind::Identifier(_) => map.get(&TokenKind::Identifier("_".to_owned())),
             TokenKind::Int(_) => map.get(&TokenKind::Int(0)),
+            TokenKind::String(_) => map.get(&TokenKind::String("_".to_owned())),
             _ => map.get(kind),
         }
     }
@@ -488,35 +500,50 @@ mod test {
         false
     }
 
-    #[test]
-    fn call_test() {
-        let inputs = ["add(1, 2 * 3, 4 + 5);"];
-
-        let tests = vec![Stmt::Expr(Expr::Call {
-            function: Box::new(Expr::Ident("add".to_owned())),
-            arguments: vec![
-                Expr::IntLiteral(1),
-                Expr::Infix(
-                    Box::new(Expr::IntLiteral(2)),
-                    Operator::Asterisk,
-                    Box::new(Expr::IntLiteral(3)),
-                ),
-                Expr::Infix(
-                    Box::new(Expr::IntLiteral(4)),
-                    Operator::Plus,
-                    Box::new(Expr::IntLiteral(5)),
-                ),
-            ],
-        })];
-
-        for (input, expected) in inputs.iter().zip(tests) {
+    fn check_tests(tests: &[(&str, Stmt)]) {
+        for (input, expected) in tests {
             let mut parser = Parser::new(Lexer::new(input, Source::Repl));
             let program = parser.parse_program();
 
             assert!(check_parser_errors(parser));
             assert_eq!(program.0.len(), 1);
-            assert_eq!(*program.0.first().unwrap(), expected);
+            assert_eq!(program.0.first().unwrap(), expected);
         }
+    }
+
+    #[test]
+    fn string_literal_test() {
+        let tests = [(
+            "\"hello world\";",
+            Stmt::Expr(Expr::StringLiteral("hello world".to_string())),
+        )];
+
+        check_tests(&tests);
+    }
+
+    #[test]
+    fn call_test() {
+        let tests = [(
+            "add(1, 2 * 3, 4 + 5);",
+            Stmt::Expr(Expr::Call {
+                function: Box::new(Expr::Ident("add".to_owned())),
+                arguments: vec![
+                    Expr::IntLiteral(1),
+                    Expr::Infix(
+                        Box::new(Expr::IntLiteral(2)),
+                        Operator::Asterisk,
+                        Box::new(Expr::IntLiteral(3)),
+                    ),
+                    Expr::Infix(
+                        Box::new(Expr::IntLiteral(4)),
+                        Operator::Plus,
+                        Box::new(Expr::IntLiteral(5)),
+                    ),
+                ],
+            }),
+        )];
+
+        check_tests(&tests);
     }
 
     #[test]

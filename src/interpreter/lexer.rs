@@ -1,4 +1,4 @@
-use std::{char, iter::Peekable, str::CharIndices};
+use std::{char, iter::Peekable, rc::Rc, str::CharIndices};
 
 use crate::interpreter::token::{Keyword, Source, Token, TokenKind};
 
@@ -12,7 +12,7 @@ pub struct Lexer<'a> {
     input: &'a str,
     chars: Peekable<CharIndices<'a>>,
     ch: Option<(usize, char)>,
-    source: Source,
+    source: Rc<Source>,
     line: usize,
     column: usize,
 }
@@ -25,7 +25,7 @@ impl<'a> Lexer<'a> {
             input,
             chars,
             ch,
-            source,
+            source: Rc::new(source),
             line: 1,
             column: 1,
         }
@@ -37,69 +37,75 @@ impl<'a> Lexer<'a> {
     }
 
     pub fn next_token(&mut self) -> Token {
-        let tok: Token;
         self.skip_white_space();
-        let x = (self.line, self.column, self.source.clone());
+        let data = (self.line, self.column, self.source.clone());
 
-        match self.ch {
+        let tok = match self.ch {
             Some((_, '=')) => {
                 if self.peek_char() == Some('=') {
                     self.read_char();
-                    tok = token!(x, TokenKind::EQ)
+                    Token::new(TokenKind::EQ, data.0, data.1, Rc::clone(&data.2))
                 } else {
-                    tok = token!(x, TokenKind::Assign)
+                    token!(data, TokenKind::Assign)
                 }
             }
             Some((_, '!')) => {
                 if self.peek_char() == Some('=') {
                     self.read_char();
-                    tok = token!(x, TokenKind::NotEQ)
+                    token!(data, TokenKind::NotEQ)
                 } else {
-                    tok = token!(x, TokenKind::Bang)
+                    token!(data, TokenKind::Bang)
                 }
             }
-            Some((_, ';')) => tok = token!(x, TokenKind::Semicolon),
-            Some((_, '/')) => tok = token!(x, TokenKind::Slash),
-            Some((_, '*')) => tok = token!(x, TokenKind::Asterisk),
-            Some((_, '<')) => tok = token!(x, TokenKind::LT),
-            Some((_, '>')) => tok = token!(x, TokenKind::GT),
-            Some((_, '(')) => tok = token!(x, TokenKind::LParen),
-            Some((_, ')')) => tok = token!(x, TokenKind::RParen),
-            Some((_, ',')) => tok = token!(x, TokenKind::Comma),
-            Some((_, '+')) => tok = token!(x, TokenKind::Plus),
-            Some((_, '-')) => tok = token!(x, TokenKind::Minus),
-            Some((_, '{')) => tok = token!(x, TokenKind::LBrace),
-            Some((_, '}')) => tok = token!(x, TokenKind::RBrace),
+            Some((_, ';')) => token!(data, TokenKind::Semicolon),
+            Some((_, '/')) => token!(data, TokenKind::Slash),
+            Some((_, '*')) => token!(data, TokenKind::Asterisk),
+            Some((_, '<')) => token!(data, TokenKind::LT),
+            Some((_, '>')) => token!(data, TokenKind::GT),
+            Some((_, '(')) => token!(data, TokenKind::LParen),
+            Some((_, ')')) => token!(data, TokenKind::RParen),
+            Some((_, ',')) => token!(data, TokenKind::Comma),
+            Some((_, '+')) => token!(data, TokenKind::Plus),
+            Some((_, '-')) => token!(data, TokenKind::Minus),
+            Some((_, '{')) => token!(data, TokenKind::LBrace),
+            Some((_, '}')) => token!(data, TokenKind::RBrace),
+            Some((_, '"')) => {
+                if let Some(s) = self.read_string() {
+                    token!(data, TokenKind::String(s))
+                } else {
+                    token!(data, TokenKind::Illegal)
+                }
+            }
             Some((_, s)) => {
                 if s.is_ascii_digit() {
                     if let Some(int) = self.read_number() {
-                        return token!(x, TokenKind::Int(int));
+                        return token!(data, TokenKind::Int(int));
                     }
                     println!("illegal token from read_number");
-                    tok = token!(x, TokenKind::Illegal);
+                    token!(data, TokenKind::Illegal)
                 } else if Self::is_letter(s) {
                     if let Some(ss) = self.read_ident() {
-                        tok = match ss {
-                            "fn" => token!(x, TokenKind::Key(Keyword::Function)),
-                            "let" => token!(x, TokenKind::Key(Keyword::Let)),
-                            "true" => token!(x, TokenKind::Key(Keyword::True)),
-                            "false" => token!(x, TokenKind::Key(Keyword::False)),
-                            "if" => token!(x, TokenKind::Key(Keyword::If)),
-                            "else" => token!(x, TokenKind::Key(Keyword::Else)),
-                            "return" => token!(x, TokenKind::Key(Keyword::Return)),
-                            _ => token!(x, TokenKind::Identifier(String::from(ss))),
+                        let t = match ss {
+                            "fn" => token!(data, TokenKind::Key(Keyword::Function)),
+                            "let" => token!(data, TokenKind::Key(Keyword::Let)),
+                            "true" => token!(data, TokenKind::Key(Keyword::True)),
+                            "false" => token!(data, TokenKind::Key(Keyword::False)),
+                            "if" => token!(data, TokenKind::Key(Keyword::If)),
+                            "else" => token!(data, TokenKind::Key(Keyword::Else)),
+                            "return" => token!(data, TokenKind::Key(Keyword::Return)),
+                            _ => token!(data, TokenKind::Identifier(String::from(ss))),
                         };
-                        return tok;
+                        return t;
                     }
-                    tok = token!(x, TokenKind::Illegal);
                     println!("illegal token from read_ident");
+                    token!(data, TokenKind::Illegal)
                 } else {
-                    tok = token!(x, TokenKind::Illegal);
                     println!("illegal token from char");
+                    token!(data, TokenKind::Illegal)
                 }
             }
-            None => tok = token!(x, TokenKind::EOF),
-        }
+            None => token!(data, TokenKind::EOF),
+        };
 
         self.read_char();
         tok
@@ -132,6 +138,7 @@ impl<'a> Lexer<'a> {
     where
         F: Fn(char) -> bool,
     {
+        // dbg!(self.ch);
         if let Some((_, c)) = self.ch {
             check(c)
         } else {
@@ -144,8 +151,15 @@ impl<'a> Lexer<'a> {
     }
 
     fn read_number(&mut self) -> Option<i64> {
-        let s = self.read(|ch| ch.is_ascii_digit())?;
+        let s = self.read(|c| c.is_ascii_digit())?;
         s.parse::<i64>().ok()
+    }
+
+    fn read_string(&mut self) -> Option<String> {
+        self.read_char();
+
+        self.read(|c| c != '"')
+            .map(|s| s.to_owned().replace("\\t", "\t").replace("\\n", "\n"))
     }
 
     fn skip_white_space(&mut self) {
@@ -195,7 +209,11 @@ mod test {
         }
         
         10 == 10;
-        10 != 9;";
+        10 != 9;
+        \"foobar\"
+        \"foo\\t bar\"
+        \"foo\\nbar\"
+        ";
 
         let expected_tokens = [
             TokenKind::Key(Keyword::Let),
@@ -271,6 +289,9 @@ mod test {
             TokenKind::NotEQ,
             TokenKind::Int(9),
             TokenKind::Semicolon,
+            TokenKind::String(String::from("foobar")),
+            TokenKind::String(String::from("foo\t bar")),
+            TokenKind::String(String::from("foo\nbar")),
             TokenKind::EOF,
         ];
 
@@ -279,6 +300,12 @@ mod test {
         for i in 0..expected_tokens.len() {
             let tok = l.next_token();
 
+            if let TokenKind::String(ref s0) = tok.kind {
+                eprintln!("got tok={s0}")
+            }
+            if let Some(TokenKind::String(s0)) = expected_tokens.get(i) {
+                eprintln!("expected={s0}")
+            }
             assert_eq!(&tok.kind, expected_tokens.get(i).unwrap());
         }
     }

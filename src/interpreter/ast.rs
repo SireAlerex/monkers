@@ -21,6 +21,7 @@ pub enum Expr {
     Ident(Ident),
     IntLiteral(i64),
     BooleanLiteral(bool),
+    StringLiteral(String),
     Prefix(Operator, Box<Expr>),
     Infix(Box<Expr>, Operator, Box<Expr>),
     If {
@@ -81,6 +82,7 @@ impl Display for Expr {
             Self::Ident(ident) => ident.clone(),
             Self::IntLiteral(int) => int.to_string(),
             Self::BooleanLiteral(bool) => bool.to_string(),
+            Self::StringLiteral(s) => s.to_string(),
             Self::Prefix(op, expr) => format!("({op}{expr})"),
             Self::Infix(left, op, right) => format!("({left} {op} {right})"),
             Self::If {

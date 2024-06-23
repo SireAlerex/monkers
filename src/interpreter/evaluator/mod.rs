@@ -32,7 +32,6 @@ impl Evaluator {
         let mut result = Object::Null;
         for stmt in block.0 {
             result = self.eval_stmt(stmt);
-            println!("eval stmt : {result:?}");
             if matches!(result, Object::Returned(_)) || matches!(result, Object::Error(_)) {
                 return result;
             }
@@ -107,19 +106,17 @@ impl Evaluator {
                 function,
                 arguments,
             } => {
-                println!("fct:{function:?}");
                 let function = self.eval_expr(*function);
                 check!(function);
-                println!("fct eval:{function:?}");
 
                 let args = self.eval_args(&arguments);
-                println!("args:{args:?}");
                 if args.len() == 1 && args.first().unwrap().is_error() {
                     return args.first().unwrap().clone();
                 }
 
                 self.apply_function(function, args)
             }
+            Expr::StringLiteral(s) => Object::String(s),
         }
     }
 
@@ -184,14 +181,14 @@ impl Evaluator {
 
     fn eval_infix(&mut self, left: Object, op: Operator, right: Object) -> Object {
         match op {
-            Operator::Plus => left.add(right),
-            Operator::Minus => left.minus(right),
-            Operator::Asterisk => left.mul(right),
-            Operator::Slash => left.div(right),
+            Operator::Plus => left + right,
+            Operator::Minus => left - right,
+            Operator::Asterisk => left * right,
+            Operator::Slash => left / right,
             Operator::Equal => Object::Boolean(left == right),
             Operator::NotEqual => Object::Boolean(left != right),
-            Operator::Less => left.lt(right),
-            Operator::Greater => left.gt(right),
+            Operator::Less => left.less(right),
+            Operator::Greater => left.greater(right),
             _ => error!("unimplemented infix operator"),
         }
     }
@@ -231,15 +228,32 @@ mod test {
 
     fn check_tests(tests: &[(&str, Object)]) {
         for test in tests {
+            println!("testing for: {}", test.0);
             let mut parser = Parser::new(Lexer::new(test.0, Source::Repl));
             let program = parser.parse_program();
-            println!("testing for: {}", test.0);
 
             let mut evaluator = Evaluator::new();
             let object = evaluator.eval(program);
+            println!("object: {object:?}");
             assert_eq!(object, test.1);
             assert_eq!(test.1, object);
         }
+    }
+
+    #[test]
+    fn string_test() {
+        let tests = [
+            (
+                "\"Hello World!\"",
+                Object::String("Hello World!".to_owned()),
+            ),
+            (
+                "\"Hello\" + \" \" + \"World!\"",
+                Object::String("Hello World!".to_owned()),
+            ),
+        ];
+
+        check_tests(&tests);
     }
 
     #[test]
@@ -355,6 +369,10 @@ mod test {
             (
                 "foobar",
                 Object::Error("identifier not found: foobar".to_string()),
+            ),
+            (
+                "\"Hello\" - \"World\";",
+                Object::Error("unknown operator: STRING - STRING".to_string()),
             ),
         ];
 
