@@ -16,7 +16,7 @@ pub fn start<R: BufRead, W: Write>(input: R, mut output: W) {
             continue;
         }
 
-        let eval = evaluator.eval(program);
+        let eval = evaluator.eval_program(program);
         write_flush(&mut output, format!("{eval}\n").as_bytes());
 
         write_flush(&mut output, b">> ");

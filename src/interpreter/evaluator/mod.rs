@@ -1,12 +1,14 @@
 use std::{cell::RefCell, rc::Rc};
 
+use builtin::BuiltinFunctions;
 use env::Environment;
 use object::{error, null, Object};
 
-use super::ast::{Block, Expr, Operator, Stmt};
+use super::ast::{Block, Expr, Operator, Program, Stmt};
 
 pub mod env;
 pub mod object;
+pub mod builtin;
 
 macro_rules! check {
     ($obj: ident) => {
@@ -28,7 +30,12 @@ impl Evaluator {
         }
     }
 
-    pub fn eval(&mut self, block: Block) -> Object {
+    pub fn eval_program(&mut self, program: Program) -> Object {
+        let res = self.eval_block(program);
+        Self::unwrap_return(res)
+    }
+
+    fn eval_block(&mut self, block: Block) -> Object {
         let mut result = Object::Null;
         for stmt in block.0 {
             result = self.eval_stmt(stmt);
@@ -82,9 +89,9 @@ impl Evaluator {
                 check!(cond);
 
                 if cond.is_truthy() {
-                    self.eval(consequence)
+                    self.eval_block(consequence)
                 } else if let Some(block) = alternative {
-                    self.eval(block)
+                    self.eval_block(block)
                 } else {
                     // need to return null if condition is false and no alternative
                     null!()
@@ -93,15 +100,13 @@ impl Evaluator {
             Expr::Ident(name) => {
                 if let Some(obj) = self.env.borrow().get(&name) {
                     obj.clone()
+                } else if let Some(builtin) = BuiltinFunctions::get(&name) {
+                    builtin
                 } else {
                     error!("identifier not found: {name}")
                 }
             }
-            Expr::FunctionLiteral { parameters, body } => Object::Function {
-                parameters,
-                body,
-                env: Rc::clone(&self.env),
-            },
+            Expr::FunctionLiteral { parameters, body } => Object::function(parameters, body, Rc::clone(&self.env)),
             Expr::Call {
                 function,
                 arguments,
@@ -121,22 +126,21 @@ impl Evaluator {
     }
 
     fn apply_function(&mut self, function: Object, args: Vec<Object>) -> Object {
-        if let Object::Function {
-            parameters,
-            body,
-            env,
-        } = function
-        {
-            let old_env = Rc::clone(&self.env);
+        match function {
+            Object::Function(function) => {
+                let old_env = Rc::clone(&self.env);
 
-            let extented_env = Self::extend_fn_env(parameters, env, args);
-            self.env = Rc::new(RefCell::new(extented_env));
-            let evaluated = self.eval(body);
-            self.env = old_env;
+                let extented_env = Self::extend_fn_env(function.parameters, function.env, args);
+                self.env = Rc::new(RefCell::new(extented_env));
+                let evaluated = self.eval_block(function.body);
+                self.env = old_env;
 
-            Self::unwrap_return(evaluated)
-        } else {
-            error!("not a function {}", function.get_type())
+                Self::unwrap_return(evaluated)
+            }
+            Object::Builtin(builtin) => {
+                builtin(args)
+            }
+            _ => error!("not a function : {}", function.get_type())
         }
     }
 
@@ -224,7 +228,7 @@ mod test {
         token::Source,
     };
 
-    use super::{env::Environment, object::Object};
+    use super::{env::Environment, object::{Function, Object}};
 
     fn check_tests(tests: &[(&str, Object)]) {
         for test in tests {
@@ -233,11 +237,24 @@ mod test {
             let program = parser.parse_program();
 
             let mut evaluator = Evaluator::new();
-            let object = evaluator.eval(program);
+            let object = evaluator.eval_program(program);
             println!("object: {object:?}");
             assert_eq!(object, test.1);
             assert_eq!(test.1, object);
         }
+    }
+
+    #[test]
+    fn builtin_test() {
+        let tests = [
+            ("len(\"\")", Object::Integer(0)),
+            ("len(\"four\")", Object::Integer(4)),
+            ("len(\"hello world\")", Object::Integer(11)),
+            ("len(1)", Object::Error("argument to 'len' not supported, got INTEGER".to_owned())),
+            ("len(\"one\", \"two\")", Object::Error("wrong number of arguments. got=2, want=1".to_owned())),
+        ];
+
+        check_tests(&tests);
     }
 
     #[test]
@@ -303,7 +320,7 @@ mod test {
     fn function_object_test() {
         let tests = [(
             "fn(x) { x + 2; };",
-            Object::Function {
+            Object::Function(Function {
                 parameters: vec!["x".to_string()],
                 body: Block(vec![Stmt::Expr(Expr::Infix(
                     Box::new(Expr::Ident("x".to_owned())),
@@ -311,7 +328,7 @@ mod test {
                     Box::new(Expr::IntLiteral(2)),
                 ))]),
                 env: Rc::new(RefCell::new(Environment::new())),
-            },
+            }),
         )];
 
         check_tests(&tests);

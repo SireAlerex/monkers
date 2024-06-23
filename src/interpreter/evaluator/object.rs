@@ -5,11 +5,13 @@ use std::{
     rc::Rc,
 };
 
+use crate::interpreter::ast::{Block, Ident};
+
+use super::{builtin::BuiltinFunction, env::Environment};
+
 macro_rules! error {
     ($($arg:tt)*) => {
-        {
-            Object::Error(format!($($arg)*))
-        }
+        Object::Error(format!($($arg)*))
     };
 }
 
@@ -19,14 +21,26 @@ macro_rules! null {
     };
 }
 
+macro_rules! int_op {
+    ($trait: tt, $func: tt, $op: tt, $op_str: literal) => {
+        impl $trait<Object> for Object {
+            type Output = Object;
+        
+            fn $func(self, rhs: Object) -> Self::Output {
+                match (self, rhs) {
+                    (Object::Integer(a), Object::Integer(b)) => Object::Integer(a $op b),
+                    (left, right) => Object::op_error(&left, &right, $op_str)
+                }
+            }
+        }
+        
+    };
+}
+
 pub(crate) use error;
 pub(crate) use null;
 
-use crate::interpreter::ast::{Block, Ident};
-
-use super::env::Environment;
-
-#[derive(Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Object {
     Integer(i64),
     Boolean(bool),
@@ -34,26 +48,8 @@ pub enum Object {
     Returned(Box<Object>),
     Null,
     Error(String),
-    Function {
-        parameters: Vec<Ident>,
-        body: Block,
-        env: Rc<RefCell<Environment>>,
-    },
-}
-
-macro_rules! op {
-    ($self: ident, $right: ident, $op: tt, $op_str: literal, $enum: ident) => {
-        match ($self, $right) {
-            (Object::Integer(a), Object::Integer(b)) => Object::$enum(a $op b),
-            (left, right) => Object::op_error(&left, &right, $op_str)
-        }
-    };
-}
-
-macro_rules! int_op {
-    ($self: ident, $right: ident, $op: tt, $op_str: literal) => {
-        op!($self, $right, $op, $op_str, Integer)
-    };
+    Function(Function),
+    Builtin(BuiltinFunction)
 }
 
 impl Add<Object> for Object {
@@ -68,31 +64,15 @@ impl Add<Object> for Object {
     }
 }
 
-impl Sub<Object> for Object {
-    type Output = Object;
-
-    fn sub(self, rhs: Object) -> Self::Output {
-        int_op!(self, rhs, -, "-")
-    }
-}
-
-impl Mul<Object> for Object {
-    type Output = Object;
-
-    fn mul(self, rhs: Object) -> Self::Output {
-        int_op!(self, rhs, *, "*")
-    }
-}
-
-impl Div<Object> for Object {
-    type Output = Object;
-
-    fn div(self, rhs: Object) -> Self::Output {
-        int_op!(self, rhs, /, "/")
-    }
-}
+int_op!(Sub, sub, -, "-");
+int_op!(Mul, mul, *, "*");
+int_op!(Div, div, /, "/");
 
 impl Object {
+    pub fn function(parameters: Vec<Ident>, body: Block, env: Rc<RefCell<Environment>>) -> Self {
+        Object::Function(Function::new(parameters, body, env))
+    }
+
     pub(crate) fn less(self, right: Object) -> Object {
         match (self, right) {
             (Object::Integer(a), Object::Integer(b)) => Object::Boolean(a < b),
@@ -141,43 +121,13 @@ impl Object {
             Object::Returned(obj) => format!("RETURNED({})", obj.get_type()),
             Object::Null => String::from("NULL"),
             Object::Function { .. } => String::from("FUNCTION"),
+            Object::Builtin(_) => String::from("BUILTIN_FUNCTION"),
             Object::Error(_) => String::from("ERROR"),
         }
     }
 
     pub fn is_error(&self) -> bool {
         matches!(self, Self::Error(_))
-    }
-}
-
-impl PartialEq for Object {
-    fn eq(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Integer(l0), Self::Integer(r0)) => l0 == r0,
-            (Self::Boolean(l0), Self::Boolean(r0)) => l0 == r0,
-            (Self::String(l0), Self::String(r0)) => l0 == r0,
-            (Self::Returned(l0), Self::Returned(r0)) => l0 == r0,
-            (Self::Returned(left), right) => **left == *right,
-            (left, Self::Returned(right)) => *left == **right,
-            (
-                Self::Function {
-                    parameters: parameters_left,
-                    body: body_left,
-                    env: environment_left,
-                },
-                Self::Function {
-                    parameters: parameters_right,
-                    body: body_right,
-                    env: environment_right,
-                },
-            ) => {
-                environment_left == environment_right
-                    && parameters_left == parameters_right
-                    && body_left == body_right
-            }
-            (Self::Error(left), Self::Error(right)) => left == right,
-            _ => core::mem::discriminant(self) == core::mem::discriminant(other),
-        }
     }
 }
 
@@ -189,30 +139,34 @@ impl Display for Object {
             Self::String(s) => write!(f, "{s}"),
             Self::Null => f.write_str("null"),
             Self::Returned(obj) => write!(f, "{obj}"),
-            Self::Function {
-                parameters, body, ..
-            } => write!(f, "fn({}) {{\n{}\n}}", parameters.join(", "), body),
+            Self::Function(function) => write!(f, "{function}"),
+            Self::Builtin(func) => write!(f, "builtin({func:?})"),
             Self::Error(s) => write!(f, "{s}"),
         }
     }
 }
 
-impl Debug for Object {
+#[derive(Clone, PartialEq)]
+pub struct Function {
+    pub parameters: Vec<Ident>,
+    pub body: Block,
+    pub env: Rc<RefCell<Environment>>,
+}
+
+impl Function {
+    pub fn new(parameters: Vec<Ident>, body: Block, env: Rc<RefCell<Environment>>) -> Self {
+        Function { parameters, body, env }
+    }
+}
+
+impl Display for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::Integer(arg0) => f.debug_tuple("Integer").field(arg0).finish(),
-            Self::Boolean(arg0) => f.debug_tuple("Boolean").field(arg0).finish(),
-            Self::String(arg0) => f.debug_tuple("String").field(arg0).finish(),
-            Self::Returned(arg0) => f.debug_tuple("Returned").field(arg0).finish(),
-            Self::Null => write!(f, "Null"),
-            Self::Error(arg0) => f.debug_tuple("Error").field(arg0).finish(),
-            Self::Function {
-                parameters, body, ..
-            } => f
-                .debug_struct("Function")
-                .field("parameters", parameters)
-                .field("body", body)
-                .finish(),
-        }
+        write!(f, "fn({}) {{\n{}\n}}", self.parameters.join(", "), self.body)
+    }
+}
+
+impl Debug for Function {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("Function").field("parameters", &self.parameters).field("body", &self.body).finish()
     }
 }
