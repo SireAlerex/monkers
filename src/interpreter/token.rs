@@ -35,7 +35,7 @@ impl Token {
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Source {
-    File(String),
+    // File(String),
     Repl,
 }
 

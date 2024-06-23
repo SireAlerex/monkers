@@ -4,10 +4,10 @@ use super::parser::Parser;
 
 pub type Program = Block;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub struct Block(pub Vec<Stmt>);
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Stmt {
     Return(Expr),
     Let(Ident, Expr),
@@ -16,7 +16,7 @@ pub enum Stmt {
 
 pub type Ident = String;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Expr {
     Ident(Ident),
     IntLiteral(i64),
@@ -38,7 +38,7 @@ pub enum Expr {
     },
 }
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Operator {
     Plus,
     Minus,
@@ -96,7 +96,7 @@ impl Display for Expr {
                 }
             }
             Self::FunctionLiteral { parameters, body } => {
-                format!("fn ({}) {{ {} }}", parameters.join(","), body)
+                format!("fn ({}) {{ {} }}", parameters.join(", "), body)
             }
             Self::Call {
                 function,

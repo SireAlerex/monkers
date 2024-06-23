@@ -131,7 +131,6 @@ fn parse_paren(parser: &mut Parser) -> Expr {
 }
 
 fn parse_if(parser: &mut Parser) -> Expr {
-
     parser.next_token();
     let cond = Box::new(
         parser
