@@ -1,6 +1,6 @@
 use std::{char, iter::Peekable, rc::Rc, str::CharIndices};
 
-use crate::interpreter::token::{Keyword, Source, Token, TokenKind};
+use crate::interpreter::token::{Keyword, Kind, Source, Token};
 
 macro_rules! token {
     ($data: ident, $kind: expr) => {
@@ -8,6 +8,7 @@ macro_rules! token {
     };
 }
 
+#[derive(Debug)]
 pub struct Lexer<'a> {
     input: &'a str,
     chars: Peekable<CharIndices<'a>>,
@@ -44,70 +45,70 @@ impl<'a> Lexer<'a> {
             Some((_, '=')) => {
                 if self.peek_char() == Some('=') {
                     self.read_char();
-                    token!(data, TokenKind::EQ)
+                    token!(data, Kind::EQ)
                 } else {
-                    token!(data, TokenKind::Assign)
+                    token!(data, Kind::Assign)
                 }
             }
             Some((_, '!')) => {
                 if self.peek_char() == Some('=') {
                     self.read_char();
-                    token!(data, TokenKind::NotEQ)
+                    token!(data, Kind::NotEQ)
                 } else {
-                    token!(data, TokenKind::Bang)
+                    token!(data, Kind::Bang)
                 }
             }
-            Some((_, ';')) => token!(data, TokenKind::Semicolon),
-            Some((_, '/')) => token!(data, TokenKind::Slash),
-            Some((_, '*')) => token!(data, TokenKind::Asterisk),
-            Some((_, '<')) => token!(data, TokenKind::LT),
-            Some((_, '>')) => token!(data, TokenKind::GT),
-            Some((_, '(')) => token!(data, TokenKind::LParen),
-            Some((_, ')')) => token!(data, TokenKind::RParen),
-            Some((_, ',')) => token!(data, TokenKind::Comma),
-            Some((_, '+')) => token!(data, TokenKind::Plus),
-            Some((_, '-')) => token!(data, TokenKind::Minus),
-            Some((_, '{')) => token!(data, TokenKind::LBrace),
-            Some((_, '}')) => token!(data, TokenKind::RBrace),
-            Some((_, '[')) => token!(data, TokenKind::LBracket),
-            Some((_, ']')) => token!(data, TokenKind::RBracket),
-            Some((_, ':')) => token!(data, TokenKind::Colon),
+            Some((_, ';')) => token!(data, Kind::Semicolon),
+            Some((_, '/')) => token!(data, Kind::Slash),
+            Some((_, '*')) => token!(data, Kind::Asterisk),
+            Some((_, '<')) => token!(data, Kind::LT),
+            Some((_, '>')) => token!(data, Kind::GT),
+            Some((_, '(')) => token!(data, Kind::LParen),
+            Some((_, ')')) => token!(data, Kind::RParen),
+            Some((_, ',')) => token!(data, Kind::Comma),
+            Some((_, '+')) => token!(data, Kind::Plus),
+            Some((_, '-')) => token!(data, Kind::Minus),
+            Some((_, '{')) => token!(data, Kind::LBrace),
+            Some((_, '}')) => token!(data, Kind::RBrace),
+            Some((_, '[')) => token!(data, Kind::LBracket),
+            Some((_, ']')) => token!(data, Kind::RBracket),
+            Some((_, ':')) => token!(data, Kind::Colon),
             Some((_, '"')) => {
                 if let Some(s) = self.read_string() {
-                    token!(data, TokenKind::String(s))
+                    token!(data, Kind::String(s))
                 } else {
-                    token!(data, TokenKind::Illegal)
+                    token!(data, Kind::Illegal)
                 }
             }
             Some((_, s)) => {
                 if s.is_ascii_digit() {
                     if let Some(int) = self.read_number() {
-                        return token!(data, TokenKind::Int(int));
+                        return token!(data, Kind::Int(int));
                     }
                     println!("illegal token from read_number");
-                    token!(data, TokenKind::Illegal)
+                    token!(data, Kind::Illegal)
                 } else if Self::is_letter(s) {
                     if let Some(ss) = self.read_ident() {
                         let t = match ss {
-                            "fn" => token!(data, TokenKind::Key(Keyword::Function)),
-                            "let" => token!(data, TokenKind::Key(Keyword::Let)),
-                            "true" => token!(data, TokenKind::Key(Keyword::True)),
-                            "false" => token!(data, TokenKind::Key(Keyword::False)),
-                            "if" => token!(data, TokenKind::Key(Keyword::If)),
-                            "else" => token!(data, TokenKind::Key(Keyword::Else)),
-                            "return" => token!(data, TokenKind::Key(Keyword::Return)),
-                            _ => token!(data, TokenKind::Identifier(String::from(ss))),
+                            "fn" => token!(data, Kind::Key(Keyword::Function)),
+                            "let" => token!(data, Kind::Key(Keyword::Let)),
+                            "true" => token!(data, Kind::Key(Keyword::True)),
+                            "false" => token!(data, Kind::Key(Keyword::False)),
+                            "if" => token!(data, Kind::Key(Keyword::If)),
+                            "else" => token!(data, Kind::Key(Keyword::Else)),
+                            "return" => token!(data, Kind::Key(Keyword::Return)),
+                            _ => token!(data, Kind::Identifier(String::from(ss))),
                         };
                         return t;
                     }
                     println!("illegal token from read_ident");
-                    token!(data, TokenKind::Illegal)
+                    token!(data, Kind::Illegal)
                 } else {
                     println!("illegal token from char");
-                    token!(data, TokenKind::Illegal)
+                    token!(data, Kind::Illegal)
                 }
             }
-            None => token!(data, TokenKind::EOF),
+            None => token!(data, Kind::EOF),
         };
 
         self.read_char();
@@ -122,14 +123,14 @@ impl<'a> Lexer<'a> {
         ch.is_alphabetic() || ch == '_'
     }
 
-    fn read<F>(&mut self, mut check: F) -> Option<&str>
+    fn read<F>(&mut self, check: F) -> Option<&str>
     where
         F: Fn(char) -> bool,
     {
         let start = self.ch?.0;
         let mut end = start;
 
-        while self.read_check(&mut check) {
+        while self.read_check(&check) {
             self.read_char();
             end += 1;
         }
@@ -137,7 +138,7 @@ impl<'a> Lexer<'a> {
         Some(s)
     }
 
-    fn read_check<F>(&self, check: &mut F) -> bool
+    fn read_check<F>(&self, check: &F) -> bool
     where
         F: Fn(char) -> bool,
     {
@@ -188,7 +189,7 @@ impl<'a> Lexer<'a> {
 
 #[cfg(test)]
 mod test {
-    use crate::interpreter::token::{Keyword, Source, TokenKind};
+    use crate::interpreter::token::{Keyword, Kind, Source};
 
     use super::Lexer;
 
@@ -220,94 +221,94 @@ mod test {
         {\"foo\": \"bar\"}";
 
         let expected_tokens = [
-            TokenKind::Key(Keyword::Let),
-            TokenKind::Identifier(String::from("five")),
-            TokenKind::Assign,
-            TokenKind::Int(5),
-            TokenKind::Semicolon,
-            TokenKind::Key(Keyword::Let),
-            TokenKind::Identifier(String::from("ten")),
-            TokenKind::Assign,
-            TokenKind::Int(10),
-            TokenKind::Semicolon,
-            TokenKind::Key(Keyword::Let),
-            TokenKind::Identifier(String::from("add")),
-            TokenKind::Assign,
-            TokenKind::Key(Keyword::Function),
-            TokenKind::LParen,
-            TokenKind::Identifier(String::from("x")),
-            TokenKind::Comma,
-            TokenKind::Identifier(String::from("y")),
-            TokenKind::RParen,
-            TokenKind::LBrace,
-            TokenKind::Identifier(String::from("x")),
-            TokenKind::Plus,
-            TokenKind::Identifier(String::from("y")),
-            TokenKind::Semicolon,
-            TokenKind::RBrace,
-            TokenKind::Semicolon,
-            TokenKind::Key(Keyword::Let),
-            TokenKind::Identifier(String::from("result")),
-            TokenKind::Assign,
-            TokenKind::Identifier(String::from("add")),
-            TokenKind::LParen,
-            TokenKind::Identifier(String::from("five")),
-            TokenKind::Comma,
-            TokenKind::Identifier(String::from("ten")),
-            TokenKind::RParen,
-            TokenKind::Semicolon,
-            TokenKind::Bang,
-            TokenKind::Minus,
-            TokenKind::Slash,
-            TokenKind::Asterisk,
-            TokenKind::Int(5),
-            TokenKind::Semicolon,
-            TokenKind::Int(5),
-            TokenKind::LT,
-            TokenKind::Int(10),
-            TokenKind::GT,
-            TokenKind::Int(5),
-            TokenKind::Semicolon,
-            TokenKind::Key(Keyword::If),
-            TokenKind::LParen,
-            TokenKind::Int(5),
-            TokenKind::LT,
-            TokenKind::Int(10),
-            TokenKind::RParen,
-            TokenKind::LBrace,
-            TokenKind::Key(Keyword::Return),
-            TokenKind::Key(Keyword::True),
-            TokenKind::Semicolon,
-            TokenKind::RBrace,
-            TokenKind::Key(Keyword::Else),
-            TokenKind::LBrace,
-            TokenKind::Key(Keyword::Return),
-            TokenKind::Key(Keyword::False),
-            TokenKind::Semicolon,
-            TokenKind::RBrace,
-            TokenKind::Int(10),
-            TokenKind::EQ,
-            TokenKind::Int(10),
-            TokenKind::Semicolon,
-            TokenKind::Int(10),
-            TokenKind::NotEQ,
-            TokenKind::Int(9),
-            TokenKind::Semicolon,
-            TokenKind::String(String::from("foobar")),
-            TokenKind::String(String::from("foo\t bar")),
-            TokenKind::String(String::from("foo\nbar")),
-            TokenKind::LBracket,
-            TokenKind::Int(1),
-            TokenKind::Comma,
-            TokenKind::Int(2),
-            TokenKind::RBracket,
-            TokenKind::Semicolon,
-            TokenKind::LBrace,
-            TokenKind::String(String::from("foo")),
-            TokenKind::Colon,
-            TokenKind::String(String::from("bar")),
-            TokenKind::RBrace,
-            TokenKind::EOF,
+            Kind::Key(Keyword::Let),
+            Kind::Identifier(String::from("five")),
+            Kind::Assign,
+            Kind::Int(5),
+            Kind::Semicolon,
+            Kind::Key(Keyword::Let),
+            Kind::Identifier(String::from("ten")),
+            Kind::Assign,
+            Kind::Int(10),
+            Kind::Semicolon,
+            Kind::Key(Keyword::Let),
+            Kind::Identifier(String::from("add")),
+            Kind::Assign,
+            Kind::Key(Keyword::Function),
+            Kind::LParen,
+            Kind::Identifier(String::from("x")),
+            Kind::Comma,
+            Kind::Identifier(String::from("y")),
+            Kind::RParen,
+            Kind::LBrace,
+            Kind::Identifier(String::from("x")),
+            Kind::Plus,
+            Kind::Identifier(String::from("y")),
+            Kind::Semicolon,
+            Kind::RBrace,
+            Kind::Semicolon,
+            Kind::Key(Keyword::Let),
+            Kind::Identifier(String::from("result")),
+            Kind::Assign,
+            Kind::Identifier(String::from("add")),
+            Kind::LParen,
+            Kind::Identifier(String::from("five")),
+            Kind::Comma,
+            Kind::Identifier(String::from("ten")),
+            Kind::RParen,
+            Kind::Semicolon,
+            Kind::Bang,
+            Kind::Minus,
+            Kind::Slash,
+            Kind::Asterisk,
+            Kind::Int(5),
+            Kind::Semicolon,
+            Kind::Int(5),
+            Kind::LT,
+            Kind::Int(10),
+            Kind::GT,
+            Kind::Int(5),
+            Kind::Semicolon,
+            Kind::Key(Keyword::If),
+            Kind::LParen,
+            Kind::Int(5),
+            Kind::LT,
+            Kind::Int(10),
+            Kind::RParen,
+            Kind::LBrace,
+            Kind::Key(Keyword::Return),
+            Kind::Key(Keyword::True),
+            Kind::Semicolon,
+            Kind::RBrace,
+            Kind::Key(Keyword::Else),
+            Kind::LBrace,
+            Kind::Key(Keyword::Return),
+            Kind::Key(Keyword::False),
+            Kind::Semicolon,
+            Kind::RBrace,
+            Kind::Int(10),
+            Kind::EQ,
+            Kind::Int(10),
+            Kind::Semicolon,
+            Kind::Int(10),
+            Kind::NotEQ,
+            Kind::Int(9),
+            Kind::Semicolon,
+            Kind::String(String::from("foobar")),
+            Kind::String(String::from("foo\t bar")),
+            Kind::String(String::from("foo\nbar")),
+            Kind::LBracket,
+            Kind::Int(1),
+            Kind::Comma,
+            Kind::Int(2),
+            Kind::RBracket,
+            Kind::Semicolon,
+            Kind::LBrace,
+            Kind::String(String::from("foo")),
+            Kind::Colon,
+            Kind::String(String::from("bar")),
+            Kind::RBrace,
+            Kind::EOF,
         ];
 
         let mut l = Lexer::new(input, Source::Repl);

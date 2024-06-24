@@ -16,7 +16,7 @@ impl Environment {
         }
     }
 
-    pub fn enclosed_env(outer: Rc<RefCell<Environment>>) -> Self {
+    pub fn enclosed_env(outer: Rc<RefCell<Self>>) -> Self {
         let mut env = Self::new();
         env.outer = Some(outer);
 
@@ -24,13 +24,14 @@ impl Environment {
     }
 
     pub fn get(&self, name: &String) -> Option<Object> {
-        if let Some(obj) = self.store.get(name) {
-            Some(obj.clone())
-        } else if let Some(ref env) = self.outer {
-            env.borrow().get(name)
-        } else {
-            None
-        }
+        self.store.get(name).map_or_else(
+            || {
+                self.outer
+                    .as_ref()
+                    .map_or_else(|| None, |env| env.borrow().get(name))
+            },
+            |obj| Some(obj.clone()),
+        )
     }
 
     pub fn set(&mut self, name: String, val: Object) -> Object {

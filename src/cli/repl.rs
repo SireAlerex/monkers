@@ -45,9 +45,8 @@ fn eval_str<W: Write>(input: &str, evaluator: &mut Evaluator, output: &mut W, so
     let mut parser = Parser::new(Lexer::new(input, source));
     let program = parser.parse_program();
 
-    if !parser.errors().is_empty() {
+    if parser.is_err() {
         print_parser_errors(output, parser.errors());
-        write_flush(output, b">> ");
     } else {
         let eval = evaluator.eval_program(program);
         if !matches!(eval, Object::Null) {
@@ -57,8 +56,9 @@ fn eval_str<W: Write>(input: &str, evaluator: &mut Evaluator, output: &mut W, so
 }
 
 fn print_parser_errors<W: Write>(output: &mut W, errors: &[String]) {
+    write_flush(output, b"Parser errors:\n");
     for error in errors {
-        write_flush(output, format!("Parser errors:\n\t{error}\n").as_bytes());
+        write_flush(output, format!("\t{error}\n").as_bytes());
     }
 }
 

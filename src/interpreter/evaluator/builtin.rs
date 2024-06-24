@@ -1,6 +1,8 @@
+use std::clone::Clone;
+
 use super::object::{error, null, Object};
 
-pub type BuiltinFunction = fn(Vec<Object>) -> Object;
+pub type BuiltinFunction = fn(&[Object]) -> Object;
 
 pub struct BuiltinFunctions;
 
@@ -34,7 +36,7 @@ impl BuiltinFunctions {
     }
 }
 
-fn len(args: Vec<Object>) -> Object {
+fn len(args: &[Object]) -> Object {
     check_arg_count!(args, 1, "1");
 
     let size = match args.first().unwrap() {
@@ -51,48 +53,42 @@ fn len(args: Vec<Object>) -> Object {
     }
 }
 
-fn first(args: Vec<Object>) -> Object {
+fn first(args: &[Object]) -> Object {
     check_arg_count!(args, 1, "1");
 
     match args.first().unwrap() {
-        Object::Array(array) => match array.first() {
-            Some(obj) => obj.clone(),
-            None => null!(),
-        },
+        Object::Array(array) => array.first().map_or_else(|| null!(), Clone::clone),
         obj => error!("argument to 'first' must be ARRAY, got {}", obj.get_type()),
     }
 }
 
-fn last(args: Vec<Object>) -> Object {
+fn last(args: &[Object]) -> Object {
     check_arg_count!(args, 1, "1");
 
     match args.first().unwrap() {
-        Object::Array(array) => match array.last() {
-            Some(obj) => obj.clone(),
-            None => null!(),
-        },
+        Object::Array(array) => array.last().map_or_else(|| null!(), Clone::clone),
         obj => error!("argument to 'last' must be ARRAY, got {}", obj.get_type()),
     }
 }
 
-fn rest(args: Vec<Object>) -> Object {
+fn rest(args: &[Object]) -> Object {
     check_arg_count!(args, 1, "1");
 
     match args.first().unwrap() {
         Object::Array(array) => {
-            if !array.is_empty() {
+            if array.is_empty() {
+                null!()
+            } else {
                 let mut new_array = array.clone();
                 new_array.remove(0);
                 Object::Array(new_array)
-            } else {
-                null!()
             }
         }
         obj => error!("argument to 'rest' must be ARRAY, got {}", obj.get_type()),
     }
 }
 
-fn push(args: Vec<Object>) -> Object {
+fn push(args: &[Object]) -> Object {
     check_arg_count!(args, 2, "2");
 
     match args.first().unwrap() {
@@ -105,14 +101,14 @@ fn push(args: Vec<Object>) -> Object {
     }
 }
 
-fn puts(args: Vec<Object>) -> Object {
+fn puts(args: &[Object]) -> Object {
     for arg in args {
         println!("{arg}");
     }
     null!()
 }
 
-fn get_type(args: Vec<Object>) -> Object {
+fn get_type(args: &[Object]) -> Object {
     check_arg_count!(args, 1, "1");
 
     Object::String(args.first().unwrap().get_type())

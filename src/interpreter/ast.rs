@@ -1,4 +1,7 @@
-use std::fmt::Display;
+use std::{
+    fmt::{self, Display, Formatter},
+    string::ToString,
+};
 
 use crate::utils;
 
@@ -49,7 +52,7 @@ pub enum Literal {
     String(String),
 }
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]
 pub enum Operator {
     Plus,
     Minus,
@@ -62,14 +65,14 @@ pub enum Operator {
     Bang,
 }
 
-pub type PrefixParseFn = fn(&mut Parser) -> Expr;
-pub type InfixParseFn = fn(&mut Parser, Expr) -> Expr;
+pub type PrefixParseFn = fn(&mut Parser) -> Option<Expr>;
+pub type InfixParseFn = fn(&mut Parser, Expr) -> Option<Expr>;
 
 impl Display for Program {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut s = String::new();
         for stmt in &self.0 {
-            s.push_str(&format!("{stmt}\n"))
+            s = format!("{s}{stmt}\n");
         }
         f.write_str(&s)
     }
@@ -95,7 +98,7 @@ impl Display for Expr {
                 "{{{}}}",
                 utils::join(hash.iter(), |(key, value)| format!("{key}: {value}"))
             ),
-            Self::Array(vec) => format!("[{}]", utils::join(vec.iter(), |expr| expr.to_string())),
+            Self::Array(vec) => format!("[{}]", utils::join(vec.iter(), ToString::to_string)),
             Self::Index(left, index) => format!("({left}[{index}])"),
             Self::Prefix(op, expr) => format!("({op}{expr})"),
             Self::Infix(left, op, right) => format!("({left} {op} {right})"),
@@ -120,7 +123,7 @@ impl Display for Expr {
             } => {
                 format!(
                     "{function}({})",
-                    utils::join(arguments.iter(), |expr| expr.to_string())
+                    utils::join(arguments.iter(), ToString::to_string)
                 )
             }
         };
@@ -129,27 +132,27 @@ impl Display for Expr {
 }
 
 impl Display for Literal {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         match self {
-            Literal::Int(x) => write!(f, "{x}"),
-            Literal::Boolean(b) => write!(f, "{b}"),
-            Literal::String(s) => write!(f, "{s}"),
+            Self::Int(x) => write!(f, "{x}"),
+            Self::Boolean(b) => write!(f, "{b}"),
+            Self::String(s) => write!(f, "{s}"),
         }
     }
 }
 
 impl Display for Operator {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+    fn fmt(&self, f: &mut Formatter<'_>) -> fmt::Result {
         let s = match self {
-            Operator::Bang => "!",
-            Operator::Plus => "+",
-            Operator::Minus => "-",
-            Operator::Asterisk => "*",
-            Operator::Slash => "/",
-            Operator::Greater => ">",
-            Operator::Less => "<",
-            Operator::Equal => "==",
-            Operator::NotEqual => "!=",
+            Self::Bang => "!",
+            Self::Plus => "+",
+            Self::Minus => "-",
+            Self::Asterisk => "*",
+            Self::Slash => "/",
+            Self::Greater => ">",
+            Self::Less => "<",
+            Self::Equal => "==",
+            Self::NotEqual => "!=",
         };
         f.write_str(s)
     }

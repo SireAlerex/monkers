@@ -3,27 +3,10 @@ use std::collections::HashMap;
 use super::{
     ast::{Block, Expr, Ident, InfixParseFn, Literal, Operator, PrefixParseFn, Program, Stmt},
     lexer::Lexer,
-    token::{Keyword, Token, TokenKind},
+    token::{Keyword, Kind, Source, Token},
 };
 
-macro_rules! peek_token_is {
-    ($self: ident, $match: pat) => {
-        matches!($self.peek_token.kind, $match)
-    };
-}
-
-macro_rules! expect_peek {
-    ($self: ident, $match: pat) => {
-        if peek_token_is!($self, $match) {
-            $self.next_token();
-            true
-        } else {
-            false
-        }
-    };
-}
-
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, Copy, PartialEq, PartialOrd)]
 enum Precedence {
     Lowest,
     Equals,
@@ -35,220 +18,205 @@ enum Precedence {
     Index,
 }
 
+#[derive(Debug)]
 pub struct Parser<'a> {
     lexer: Lexer<'a>,
     cur_token: Token,
     peek_token: Token,
     errors: Vec<String>,
-    prefix_fns: HashMap<TokenKind, PrefixParseFn>,
-    infix_fns: HashMap<TokenKind, InfixParseFn>,
+    prefix_fns: HashMap<Kind, PrefixParseFn>,
+    infix_fns: HashMap<Kind, InfixParseFn>,
 }
 
-fn precedence(kind: &TokenKind) -> Precedence {
+const fn precedence(kind: &Kind) -> Precedence {
     match kind {
-        TokenKind::EQ => Precedence::Equals,
-        TokenKind::NotEQ => Precedence::Equals,
-        TokenKind::LT => Precedence::LessGreater,
-        TokenKind::GT => Precedence::LessGreater,
-        TokenKind::Plus => Precedence::Sum,
-        TokenKind::Minus => Precedence::Sum,
-        TokenKind::Slash => Precedence::Product,
-        TokenKind::Asterisk => Precedence::Product,
-        TokenKind::LParen => Precedence::Call,
-        TokenKind::LBracket => Precedence::Index,
+        Kind::EQ | Kind::NotEQ => Precedence::Equals,
+        Kind::LT | Kind::GT => Precedence::LessGreater,
+        Kind::Plus | Kind::Minus => Precedence::Sum,
+        Kind::Asterisk | Kind::Slash => Precedence::Product,
+        Kind::LParen => Precedence::Call,
+        Kind::LBracket => Precedence::Index,
         _ => Precedence::Lowest,
     }
 }
 
-fn parse_ident(parser: &mut Parser) -> Expr {
-    if let TokenKind::Identifier(s) = &parser.cur_token.kind {
-        Expr::Ident(s.clone())
+fn parse_ident(parser: &mut Parser) -> Option<Expr> {
+    if let Kind::Identifier(s) = &parser.cur_token.kind {
+        Some(Expr::Ident(s.clone()))
     } else {
-        panic!("should never happen")
+        parser.error_from_current("error parsing ident: not an ident, should never happen")?
     }
 }
 
-fn parse_int_literal(parser: &mut Parser) -> Expr {
-    if let TokenKind::Int(x) = &parser.cur_token.kind {
-        Expr::Literal(Literal::Int(*x))
+fn parse_int_literal(parser: &mut Parser) -> Option<Expr> {
+    if let Kind::Int(x) = &parser.cur_token.kind {
+        Some(Expr::Literal(Literal::Int(*x)))
     } else {
-        panic!("should never happen")
+        parser.error_from_current("error parsing integer: not an integer, should never happen")?
     }
 }
 
-fn parse_prefix(parser: &mut Parser) -> Expr {
+fn parse_prefix(parser: &mut Parser) -> Option<Expr> {
     let op = match parser.cur_token.kind {
-        TokenKind::Minus => Operator::Minus,
-        TokenKind::Bang => Operator::Bang,
-        _ => panic!("prefix op should never happen"),
+        Kind::Minus => Operator::Minus,
+        Kind::Bang => Operator::Bang,
+        _ => parser
+            .error_from_current(&format!("bad prefix operator: {:?}", parser.cur_token.kind))?,
     };
 
     parser.next_token();
 
-    let right = parser
-        .parse_expression(Precedence::Prefix)
-        .expect("parse prefix right expr error");
-
-    Expr::Prefix(op, Box::new(right))
+    if let Some(right) = parser.parse_expression(Precedence::Prefix) {
+        Some(Expr::Prefix(op, Box::new(right)))
+    } else {
+        parser.error_from_current("prefix expr: can't parse right expr")?
+    }
 }
 
-fn parse_infix(parser: &mut Parser, left: Expr) -> Expr {
+fn parse_infix(parser: &mut Parser, left: Expr) -> Option<Expr> {
     let op = match parser.cur_token.kind {
-        TokenKind::Plus => Operator::Plus,
-        TokenKind::Minus => Operator::Minus,
-        TokenKind::Asterisk => Operator::Asterisk,
-        TokenKind::Slash => Operator::Slash,
-        TokenKind::GT => Operator::Greater,
-        TokenKind::LT => Operator::Less,
-        TokenKind::EQ => Operator::Equal,
-        TokenKind::NotEQ => Operator::NotEqual,
-        _ => panic!("infix op should never happen"),
+        Kind::Plus => Operator::Plus,
+        Kind::Minus => Operator::Minus,
+        Kind::Asterisk => Operator::Asterisk,
+        Kind::Slash => Operator::Slash,
+        Kind::GT => Operator::Greater,
+        Kind::LT => Operator::Less,
+        Kind::EQ => Operator::Equal,
+        Kind::NotEQ => Operator::NotEqual,
+        _ => parser
+            .error_from_current(&format!("bad prefix operator: {:?}", parser.cur_token.kind))?,
     };
 
     let precedence = parser.cur_precedence();
     parser.next_token();
-    let right = parser
-        .parse_expression(precedence)
-        .expect("parse infix right expr error");
 
-    Expr::Infix(Box::new(left), op, Box::new(right))
+    if let Some(right) = parser.parse_expression(precedence) {
+        Some(Expr::Infix(Box::new(left), op, Box::new(right)))
+    } else {
+        parser.error_from_current("infix expr: can't parse right expr")?
+    }
 }
 
-fn parse_boolean(parser: &mut Parser) -> Expr {
-    Expr::Literal(Literal::Boolean(
-        parser.cur_token_is(&TokenKind::Key(Keyword::True)),
-    ))
+// #[allow(unnecessary_wraps)]
+fn parse_boolean(parser: &mut Parser) -> Option<Expr> {
+    Some(Expr::Literal(Literal::Boolean(
+        parser.cur_token_is(&Kind::Key(Keyword::True)),
+    )))
 }
 
-fn parse_paren(parser: &mut Parser) -> Expr {
+fn parse_paren(parser: &mut Parser) -> Option<Expr> {
     parser.next_token();
 
-    let expr = parser
-        .parse_expression(Precedence::Lowest)
-        .expect("parse gouped expr error");
+    if let Some(expr) = parser.parse_expression(Precedence::Lowest) {
+        parser.check_peek(&Kind::RParen)?;
 
-    if !parser.expect_peek(&TokenKind::RParen) {
-        panic!("paren no RParen");
+        Some(expr)
+    } else {
+        parser.error_from_current("grouped expr: can't parse expr")?
     }
-
-    expr
 }
 
-fn parse_if(parser: &mut Parser) -> Expr {
+fn parse_if(parser: &mut Parser) -> Option<Expr> {
     parser.next_token();
-    let cond = Box::new(
-        parser
-            .parse_expression(Precedence::Lowest)
-            .expect("parse if bad cond"),
-    );
+    let cond = if let Some(cond) = parser.parse_expression(Precedence::Lowest) {
+        Box::new(cond)
+    } else {
+        parser.error_from_current("if expr: can't parse condition")?
+    };
 
-    if !parser.expect_peek(&TokenKind::LBrace) {
-        panic!("if no LBrace");
-    }
+    parser.check_peek(&Kind::LBrace)?;
 
     let consequence = parser.parse_block();
 
-    let alternative = if parser.peek_token_is(&TokenKind::Key(Keyword::Else)) {
+    let alternative = if parser.peek_token_is(&Kind::Key(Keyword::Else)) {
         parser.next_token();
-
-        if !parser.expect_peek(&TokenKind::LBrace) {
-            panic!("else no LBrace");
-        }
+        parser.check_peek(&Kind::LBrace)?;
 
         Some(parser.parse_block())
     } else {
         None
     };
 
-    Expr::If {
+    Some(Expr::If {
         cond,
         consequence,
         alternative,
-    }
+    })
 }
 
-fn parse_fn(parser: &mut Parser) -> Expr {
-    if !parser.expect_peek(&TokenKind::LParen) {
-        panic!("fn no LParen");
-    }
-
-    let parameters = parser.parse_parameters();
-
-    if !parser.expect_peek(&TokenKind::LBrace) {
-        panic!("fn no LBrace");
-    }
+fn parse_fn(parser: &mut Parser) -> Option<Expr> {
+    // parsing parameters
+    parser.check_peek(&Kind::LParen)?;
+    let parameters = parser.parse_parameters()?;
+    parser.check_peek(&Kind::LBrace)?;
 
     let body = parser.parse_block();
 
-    Expr::FunctionLiteral { parameters, body }
+    Some(Expr::FunctionLiteral { parameters, body })
 }
 
-fn parse_call(parser: &mut Parser, function: Expr) -> Expr {
-    let arguments = parser.parse_arguments();
+fn parse_call(parser: &mut Parser, function: Expr) -> Option<Expr> {
+    let arguments = parser.parse_arguments()?;
 
-    Expr::Call {
+    Some(Expr::Call {
         function: Box::new(function),
         arguments,
-    }
+    })
 }
 
-fn parse_string(parser: &mut Parser) -> Expr {
-    if let TokenKind::String(ref s) = parser.cur_token.kind {
-        Expr::Literal(Literal::String(s.to_owned()))
+fn parse_string(parser: &mut Parser) -> Option<Expr> {
+    if let Kind::String(ref s) = parser.cur_token.kind {
+        Some(Expr::Literal(Literal::String(s.to_owned())))
     } else {
-        panic!("should never happen")
+        parser.error_from_current("error parsing string: not an string, should never happen")?
     }
 }
 
-fn parse_array(parser: &mut Parser) -> Expr {
-    let elements = parser.parse_expr_list(&TokenKind::RBracket);
+fn parse_array(parser: &mut Parser) -> Option<Expr> {
+    let elements = parser.parse_expr_list(&Kind::RBracket);
 
-    Expr::Array(elements)
+    Some(Expr::Array(elements?))
 }
 
-fn parse_index(parser: &mut Parser, left: Expr) -> Expr {
+fn parse_index(parser: &mut Parser, left: Expr) -> Option<Expr> {
     parser.next_token();
     if let Some(index) = parser.parse_expression(Precedence::Lowest) {
-        if !parser.expect_peek(&TokenKind::RBracket) {
-            panic!("should never happen");
-        }
+        parser.check_peek(&Kind::RBracket)?;
 
-        Expr::Index(Box::new(left), Box::new(index))
+        Some(Expr::Index(Box::new(left), Box::new(index)))
     } else {
-        panic!("no index should never happen");
+        parser.error_from_current("index expr: can't parse index")?
     }
 }
 
-fn parse_hash(parser: &mut Parser) -> Expr {
+fn parse_hash(parser: &mut Parser) -> Option<Expr> {
     let mut pairs = Vec::new();
 
-    while !parser.peek_token_is(&TokenKind::RBrace) {
+    while !parser.peek_token_is(&Kind::RBrace) {
         parser.next_token();
-        let key = parser
-            .parse_expression(Precedence::Lowest)
-            .expect("deal with error");
+        let key = match parser.parse_expression(Precedence::Lowest) {
+            Some(expr) => expr,
+            None => parser.error_from_current("hashmap error: can't parse key")?,
+        };
 
-        if !parser.expect_peek(&TokenKind::Colon) {
-            panic!("deal with error");
-        }
+        parser.check_peek(&Kind::Colon)?;
 
         parser.next_token();
-        let value = parser
-            .parse_expression(Precedence::Lowest)
-            .expect("deal with error");
+        let value = match parser.parse_expression(Precedence::Lowest) {
+            Some(expr) => expr,
+            None => parser.error_from_current("hashmap error: can't parse value")?,
+        };
 
         pairs.push((key, value));
 
-        if !parser.peek_token_is(&TokenKind::RBrace) && !parser.expect_peek(&TokenKind::Comma) {
-            panic!("deal with error");
+        if !parser.peek_token_is(&Kind::RBrace) {
+            parser.check_peek(&Kind::Comma)?;
         }
     }
 
-    if !parser.expect_peek(&TokenKind::RBrace) {
-        panic!("deal with error");
-    }
+    parser.check_peek(&Kind::RBrace)?;
 
-    Expr::HashLiteral(pairs)
+    Some(Expr::HashLiteral(pairs))
 }
 
 // TODO: function to return None and add an error
@@ -266,42 +234,38 @@ impl<'a, 'b> Parser<'a> {
         // Prefix functions
         parser
             .prefix_fns
-            .insert(TokenKind::Identifier("_".to_owned()), parse_ident);
+            .insert(Kind::Identifier("_".to_owned()), parse_ident);
         parser
             .prefix_fns
-            .insert(TokenKind::String("_".to_owned()), parse_string);
+            .insert(Kind::String("_".to_owned()), parse_string);
+        parser.prefix_fns.insert(Kind::Int(0), parse_int_literal);
         parser
             .prefix_fns
-            .insert(TokenKind::Int(0), parse_int_literal);
+            .insert(Kind::Key(Keyword::True), parse_boolean);
         parser
             .prefix_fns
-            .insert(TokenKind::Key(Keyword::True), parse_boolean);
+            .insert(Kind::Key(Keyword::False), parse_boolean);
+        parser.prefix_fns.insert(Kind::Key(Keyword::If), parse_if);
         parser
             .prefix_fns
-            .insert(TokenKind::Key(Keyword::False), parse_boolean);
-        parser
-            .prefix_fns
-            .insert(TokenKind::Key(Keyword::If), parse_if);
-        parser
-            .prefix_fns
-            .insert(TokenKind::Key(Keyword::Function), parse_fn);
-        parser.prefix_fns.insert(TokenKind::Bang, parse_prefix);
-        parser.prefix_fns.insert(TokenKind::Minus, parse_prefix);
-        parser.prefix_fns.insert(TokenKind::LParen, parse_paren);
-        parser.prefix_fns.insert(TokenKind::LBracket, parse_array);
-        parser.prefix_fns.insert(TokenKind::LBrace, parse_hash);
+            .insert(Kind::Key(Keyword::Function), parse_fn);
+        parser.prefix_fns.insert(Kind::Bang, parse_prefix);
+        parser.prefix_fns.insert(Kind::Minus, parse_prefix);
+        parser.prefix_fns.insert(Kind::LParen, parse_paren);
+        parser.prefix_fns.insert(Kind::LBracket, parse_array);
+        parser.prefix_fns.insert(Kind::LBrace, parse_hash);
 
         // Infix functions
-        parser.infix_fns.insert(TokenKind::Plus, parse_infix);
-        parser.infix_fns.insert(TokenKind::Minus, parse_infix);
-        parser.infix_fns.insert(TokenKind::Asterisk, parse_infix);
-        parser.infix_fns.insert(TokenKind::Slash, parse_infix);
-        parser.infix_fns.insert(TokenKind::GT, parse_infix);
-        parser.infix_fns.insert(TokenKind::LT, parse_infix);
-        parser.infix_fns.insert(TokenKind::EQ, parse_infix);
-        parser.infix_fns.insert(TokenKind::NotEQ, parse_infix);
-        parser.infix_fns.insert(TokenKind::LParen, parse_call);
-        parser.infix_fns.insert(TokenKind::LBracket, parse_index);
+        parser.infix_fns.insert(Kind::Plus, parse_infix);
+        parser.infix_fns.insert(Kind::Minus, parse_infix);
+        parser.infix_fns.insert(Kind::Asterisk, parse_infix);
+        parser.infix_fns.insert(Kind::Slash, parse_infix);
+        parser.infix_fns.insert(Kind::GT, parse_infix);
+        parser.infix_fns.insert(Kind::LT, parse_infix);
+        parser.infix_fns.insert(Kind::EQ, parse_infix);
+        parser.infix_fns.insert(Kind::NotEQ, parse_infix);
+        parser.infix_fns.insert(Kind::LParen, parse_call);
+        parser.infix_fns.insert(Kind::LBracket, parse_index);
 
         parser.next_token();
         parser.next_token();
@@ -318,7 +282,7 @@ impl<'a, 'b> Parser<'a> {
     pub fn parse_program(&mut self) -> Program {
         let mut program = Block(Vec::new());
 
-        while self.cur_token.kind != TokenKind::EOF {
+        while self.cur_token.kind != Kind::EOF {
             if let Some(stmt) = self.parse_stmt() {
                 program.0.push(stmt);
             }
@@ -330,8 +294,8 @@ impl<'a, 'b> Parser<'a> {
 
     fn parse_stmt(&mut self) -> Option<Stmt> {
         match self.cur_token.kind {
-            TokenKind::Key(Keyword::Let) => self.parse_let_stmt(),
-            TokenKind::Key(Keyword::Return) => self.parse_return_stmt(),
+            Kind::Key(Keyword::Let) => self.parse_let_stmt(),
+            Kind::Key(Keyword::Return) => self.parse_return_stmt(),
             _ => self.parse_expression_stmt(),
         }
     }
@@ -339,7 +303,7 @@ impl<'a, 'b> Parser<'a> {
     fn parse_expression_stmt(&mut self) -> Option<Stmt> {
         let expr = self.parse_expression(Precedence::Lowest)?;
 
-        if self.peek_token_is(&TokenKind::Semicolon) {
+        if self.peek_token_is(&Kind::Semicolon) {
             self.next_token();
         }
 
@@ -348,15 +312,14 @@ impl<'a, 'b> Parser<'a> {
 
     fn parse_expression(&mut self, precedence: Precedence) -> Option<Expr> {
         if let Some(prefix) = Self::get_fn(&self.prefix_fns, &self.cur_token.kind) {
-            let mut left = prefix(self);
+            let mut left = prefix(self)?;
 
-            while !self.peek_token_is(&TokenKind::Semicolon) && precedence < self.peek_precedence()
-            {
+            while !self.peek_token_is(&Kind::Semicolon) && precedence < self.peek_precedence() {
                 // TODO: get rid of clone
                 let map = self.infix_fns.clone();
                 if let Some(infix) = Self::get_fn(&map, &self.peek_token.kind) {
                     self.next_token();
-                    left = infix(self, left);
+                    left = infix(self, left)?;
                 } else {
                     return Some(left);
                 }
@@ -364,8 +327,10 @@ impl<'a, 'b> Parser<'a> {
 
             Some(left)
         } else {
-            self.no_prefix_error();
-            None
+            self.error_from_current(&format!(
+                "no prefix parse function for {:?} found",
+                self.cur_token.kind
+            ))
         }
     }
 
@@ -373,11 +338,11 @@ impl<'a, 'b> Parser<'a> {
         self.next_token();
 
         let mut stmts = Vec::new();
-        while !self.cur_token_is(&TokenKind::RBrace) && !self.cur_token_is(&TokenKind::EOF) {
+        while !self.cur_token_is(&Kind::RBrace) && !self.cur_token_is(&Kind::EOF) {
             if let Some(stmt) = self.parse_stmt() {
                 stmts.push(stmt);
             } else {
-                eprintln!("parse stmt none from parse block");
+                _ = self.error_from_current::<()>("block error: can't parse statement");
             }
             self.next_token();
         }
@@ -385,30 +350,27 @@ impl<'a, 'b> Parser<'a> {
         Block(stmts)
     }
 
-    fn no_prefix_error(&mut self) {
-        self.errors.push(format!(
-            "no prefix parse function for {:?} found",
-            self.cur_token.kind
-        ));
-    }
-
-    // TODO: remove Option for fns like this when possible (errors instead) ?? (maybe need option)
     fn parse_let_stmt(&mut self) -> Option<Stmt> {
-        if !expect_peek!(self, TokenKind::Identifier(_)) {
-            return None;
+        if let Kind::Identifier(_) = &self.peek_token.kind {
+            self.next_token();
+        } else {
+            return self.error_from_token::<Stmt>(
+                &format!(
+                    "expected next token to be Identifier, got {:?} instead",
+                    self.peek_token.kind
+                ),
+                &self.peek_token.clone(),
+            );
         }
 
         let name: Ident = Token::ident(&self.cur_token)?;
 
-        if !self.expect_peek(&TokenKind::Assign) {
-            return None;
-        }
-
+        self.check_peek(&Kind::Assign)?;
         self.next_token();
 
         let value = self.parse_expression(Precedence::Lowest)?;
 
-        if self.peek_token_is(&TokenKind::Semicolon) {
+        if self.peek_token_is(&Kind::Semicolon) {
             self.next_token();
         }
 
@@ -419,62 +381,23 @@ impl<'a, 'b> Parser<'a> {
         self.next_token();
 
         let ret = self.parse_expression(Precedence::Lowest)?;
-        if self.peek_token_is(&TokenKind::Semicolon) {
+        if self.peek_token_is(&Kind::Semicolon) {
             self.next_token();
         }
 
         Some(Stmt::Return(ret))
     }
 
-    fn cur_token_is(&self, kind: &TokenKind) -> bool {
-        self.cur_token.kind == *kind
+    fn parse_arguments(&mut self) -> Option<Vec<Expr>> {
+        self.parse_expr_list(&Kind::RParen)
     }
 
-    fn peek_token_is(&self, kind: &TokenKind) -> bool {
-        self.peek_token.kind == *kind
-    }
-
-    fn expect_peek(&mut self, kind: &TokenKind) -> bool {
-        if self.peek_token_is(kind) {
-            self.next_token();
-            true
-        } else {
-            self.peek_error(kind);
-            false
-        }
-    }
-
-    fn peek_error(&mut self, kind: &TokenKind) {
-        self.errors.push(format!(
-            "expected next token to be {kind:?}, got {:?} instead",
-            self.peek_token.kind
-        ))
-    }
-
-    // Standardized enums for the ones that can hold data to find them in hash
-    fn get_fn<T>(map: &'b HashMap<TokenKind, T>, kind: &TokenKind) -> Option<&'b T> {
-        match kind {
-            TokenKind::Identifier(_) => map.get(&TokenKind::Identifier("_".to_owned())),
-            TokenKind::Int(_) => map.get(&TokenKind::Int(0)),
-            TokenKind::String(_) => map.get(&TokenKind::String("_".to_owned())),
-            _ => map.get(kind),
-        }
-    }
-
-    fn peek_precedence(&self) -> Precedence {
-        precedence(&self.peek_token.kind)
-    }
-
-    fn cur_precedence(&self) -> Precedence {
-        precedence(&self.cur_token.kind)
-    }
-
-    fn parse_expr_list(&mut self, end: &TokenKind) -> Vec<Expr> {
+    fn parse_expr_list(&mut self, end: &Kind) -> Option<Vec<Expr>> {
         let mut list = Vec::new();
 
         if self.peek_token_is(end) {
             self.next_token();
-            return list;
+            return Some(list);
         }
 
         self.next_token();
@@ -482,7 +405,7 @@ impl<'a, 'b> Parser<'a> {
             list.push(expr);
         }
 
-        while self.peek_token_is(&TokenKind::Comma) {
+        while self.peek_token_is(&Kind::Comma) {
             self.next_token();
             self.next_token();
 
@@ -491,51 +414,121 @@ impl<'a, 'b> Parser<'a> {
             }
         }
 
-        if !self.expect_peek(end) {
-            //TODO: deal with error
-        }
+        self.check_peek(end)?;
 
-        list
+        Some(list)
     }
 
-    fn parse_parameters(&mut self) -> Vec<Ident> {
+    fn parse_parameters(&mut self) -> Option<Vec<Ident>> {
         let mut parameters = Vec::new();
 
-        if self.peek_token_is(&TokenKind::RParen) {
+        if self.peek_token_is(&Kind::RParen) {
             self.next_token();
-            return parameters;
+            return Some(parameters);
         }
 
         self.next_token();
-        if let TokenKind::Identifier(ident) = &self.cur_token.kind {
+        if let Kind::Identifier(ident) = &self.cur_token.kind {
             parameters.push(ident.clone());
         }
 
-        while self.peek_token_is(&TokenKind::Comma) {
+        while self.peek_token_is(&Kind::Comma) {
             self.next_token();
             self.next_token();
 
-            if let TokenKind::Identifier(ident) = &self.cur_token.kind {
+            if let Kind::Identifier(ident) = &self.cur_token.kind {
                 parameters.push(ident.clone());
             }
         }
 
-        if !self.expect_peek(&TokenKind::RParen) {
-            //TODO: deal with error
+        self.check_peek(&Kind::RParen)?;
+
+        Some(parameters)
+    }
+
+    // Precedence and prefix/infix function handling
+
+    // Standardized enums for the ones that can hold data to find them in hash
+    fn get_fn<T>(map: &'b HashMap<Kind, T>, kind: &Kind) -> Option<&'b T> {
+        match kind {
+            Kind::Identifier(_) => map.get(&Kind::Identifier("_".to_owned())),
+            Kind::Int(_) => map.get(&Kind::Int(0)),
+            Kind::String(_) => map.get(&Kind::String("_".to_owned())),
+            _ => map.get(kind),
         }
-
-        parameters
     }
 
-    fn parse_arguments(&mut self) -> Vec<Expr> {
-        self.parse_expr_list(&TokenKind::RParen)
+    const fn peek_precedence(&self) -> Precedence {
+        precedence(&self.peek_token.kind)
     }
 
-    pub fn errors(&self) -> &Vec<String> {
+    const fn cur_precedence(&self) -> Precedence {
+        precedence(&self.cur_token.kind)
+    }
+
+    // Checking tokens and error handling
+
+    fn cur_token_is(&self, kind: &Kind) -> bool {
+        self.cur_token.kind == *kind
+    }
+
+    fn peek_token_is(&self, kind: &Kind) -> bool {
+        self.peek_token.kind == *kind
+    }
+
+    fn check_peek(&mut self, kind: &Kind) -> Option<()> {
+        if self.peek_token_is(kind) {
+            self.next_token();
+            Some(())
+        } else {
+            self.peek_error(kind)
+        }
+    }
+
+    fn peek_error(&mut self, kind: &Kind) -> Option<()> {
+        self.expect_token_error(&self.peek_token.clone(), kind)
+    }
+
+    fn expect_token_error(&mut self, token: &Token, expected: &Kind) -> Option<()> {
+        self.error_from_token::<()>(
+            &format!(
+                "expected next token to be {expected:?}, got {:?} instead",
+                token.kind
+            ),
+            token,
+        )
+    }
+
+    fn error_from_current<T>(&mut self, msg: &str) -> Option<T> {
+        self.error_from_token(msg, &self.cur_token.clone())
+    }
+
+    fn error_from_token<T>(&mut self, msg: &str, token: &Token) -> Option<T> {
+        let source = match token.source.as_ref() {
+            Source::File(file) => format!("{file}: "),
+            Source::Repl => String::new(),
+        };
+        self.error(format!(
+            "{source}line={} column={} -> {msg}",
+            token.line, token.column
+        ))
+    }
+
+    fn error<T>(&mut self, msg: String) -> Option<T> {
+        self.errors.push(msg);
+        None
+    }
+
+    pub const fn errors(&self) -> &Vec<String> {
         &self.errors
+    }
+
+    pub fn is_err(&self) -> bool {
+        !self.errors.is_empty()
     }
 }
 
+#[allow(clippy::unreadable_literal)]
 #[cfg(test)]
 mod test {
     use crate::interpreter::{

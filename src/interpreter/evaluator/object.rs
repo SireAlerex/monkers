@@ -58,14 +58,14 @@ pub enum Object {
     Builtin(BuiltinFunction),
 }
 
-impl Add<Object> for Object {
-    type Output = Object;
+impl Add<Self> for Object {
+    type Output = Self;
 
-    fn add(self, rhs: Object) -> Self::Output {
+    fn add(self, rhs: Self) -> Self::Output {
         match (self, rhs) {
-            (Object::Integer(a), Object::Integer(b)) => Object::Integer(a + b),
-            (Object::String(a), Object::String(b)) => Object::String(a + &b),
-            (left, right) => Object::op_error(&left, &right, "+"),
+            (Self::Integer(a), Self::Integer(b)) => Self::Integer(a + b),
+            (Self::String(a), Self::String(b)) => Self::String(a + &b),
+            (left, right) => Self::op_error(&left, &right, "+"),
         }
     }
 }
@@ -76,12 +76,12 @@ int_op!(Div, div, /, "/");
 
 impl Object {
     pub fn function(parameters: Vec<Ident>, body: Block, env: Rc<RefCell<Environment>>) -> Self {
-        Object::Function(Function::new(parameters, body, env))
+        Self::Function(Function::new(parameters, body, env))
     }
 
-    pub fn get(&self, index: &Object) -> Object {
+    pub fn get(&self, index: &Self) -> Self {
         match (self, index) {
-            (Object::Array(array), Object::Integer(i)) => {
+            (Self::Array(array), Self::Integer(i)) => {
                 if *i < 0 {
                     return null!();
                 }
@@ -96,17 +96,10 @@ impl Object {
                     Err(err) => error!("size can't be a 64bit integer ({err})"),
                 }
             }
-            (Object::Hash(hash), _) => {
-                if let Some(key) = index.literal() {
-                    if let Some(obj) = hash.get(&key) {
-                        obj.clone()
-                    } else {
-                        null!()
-                    }
-                } else {
-                    error!("unusable as hash key: {}", index.get_type())
-                }
-            }
+            (Self::Hash(hash), _) => index.literal().map_or_else(
+                || error!("unusable as hash key: {}", index.get_type()),
+                |key| hash.get(&key).map_or_else(|| null!(), Clone::clone),
+            ),
             (_, _) => error!(
                 "index operation not supported: {}[{}]",
                 self.get_type(),
@@ -115,23 +108,23 @@ impl Object {
         }
     }
 
-    pub(crate) fn less(self, right: Object) -> Object {
+    pub(crate) fn less(self, right: Self) -> Self {
         match (self, right) {
-            (Object::Integer(a), Object::Integer(b)) => Object::Boolean(a < b),
-            (Object::String(a), Object::String(b)) => Object::Boolean(a < b),
-            (left, right) => Object::op_error(&left, &right, "<"),
+            (Self::Integer(a), Self::Integer(b)) => Self::Boolean(a < b),
+            (Self::String(a), Self::String(b)) => Self::Boolean(a < b),
+            (left, right) => Self::op_error(&left, &right, "<"),
         }
     }
 
-    pub(crate) fn greater(self, right: Object) -> Object {
+    pub(crate) fn greater(self, right: Self) -> Self {
         match (self, right) {
-            (Object::Integer(a), Object::Integer(b)) => Object::Boolean(a > b),
-            (Object::String(a), Object::String(b)) => Object::Boolean(a > b),
-            (left, right) => Object::op_error(&left, &right, ">"),
+            (Self::Integer(a), Self::Integer(b)) => Self::Boolean(a > b),
+            (Self::String(a), Self::String(b)) => Self::Boolean(a > b),
+            (left, right) => Self::op_error(&left, &right, ">"),
         }
     }
 
-    fn op_error(left: &Object, right: &Object, op: &str) -> Object {
+    fn op_error(left: &Self, right: &Self, op: &str) -> Self {
         if core::mem::discriminant(left) == core::mem::discriminant(right) {
             error!(
                 "unknown operator: {} {op} {}",
@@ -147,38 +140,38 @@ impl Object {
         }
     }
 
-    pub(crate) fn is_truthy(&self) -> bool {
+    pub(crate) const fn is_truthy(&self) -> bool {
         match self {
-            Object::Boolean(b) => *b,
-            Object::Null => false,
+            Self::Boolean(b) => *b,
+            Self::Null => false,
             _ => true,
         }
     }
 
     pub fn get_type(&self) -> String {
         match self {
-            Object::Integer(_) => String::from("INTEGER"),
-            Object::Boolean(_) => String::from("BOOLEAN"),
-            Object::String(_) => String::from("STRING"),
-            Object::Hash(_) => String::from("HASH"),
-            Object::Array(_) => String::from("ARRAY"),
-            Object::Returned(obj) => format!("RETURNED({})", obj.get_type()),
-            Object::Null => String::from("NULL"),
-            Object::Function { .. } => String::from("FUNCTION"),
-            Object::Builtin(_) => String::from("BUILTIN_FUNCTION"),
-            Object::Error(_) => String::from("ERROR"),
+            Self::Integer(_) => String::from("INTEGER"),
+            Self::Boolean(_) => String::from("BOOLEAN"),
+            Self::String(_) => String::from("STRING"),
+            Self::Hash(_) => String::from("HASH"),
+            Self::Array(_) => String::from("ARRAY"),
+            Self::Returned(obj) => format!("RETURNED({})", obj.get_type()),
+            Self::Null => String::from("NULL"),
+            Self::Function { .. } => String::from("FUNCTION"),
+            Self::Builtin(_) => String::from("BUILTIN_FUNCTION"),
+            Self::Error(_) => String::from("ERROR"),
         }
     }
 
-    pub fn is_error(&self) -> bool {
+    pub const fn is_error(&self) -> bool {
         matches!(self, Self::Error(_))
     }
 
     pub fn literal(&self) -> Option<Literal> {
         match self {
-            Object::Integer(x) => Some(Literal::Int(*x)),
-            Object::String(s) => Some(Literal::String(s.to_owned())),
-            Object::Boolean(b) => Some(Literal::Boolean(*b)),
+            Self::Integer(x) => Some(Literal::Int(*x)),
+            Self::String(s) => Some(Literal::String(s.to_owned())),
+            Self::Boolean(b) => Some(Literal::Boolean(*b)),
             _ => None,
         }
     }
@@ -189,7 +182,7 @@ impl Display for Object {
         match self {
             Self::Integer(x) => write!(f, "{x}"),
             Self::Boolean(bool) => write!(f, "{bool}"),
-            Self::String(s) => write!(f, "{s}"),
+            Self::String(s) | Self::Error(s) => write!(f, "{s}"),
             Self::Hash(hash) => {
                 write!(
                     f,
@@ -198,17 +191,12 @@ impl Display for Object {
                 )
             }
             Self::Array(array) => {
-                write!(
-                    f,
-                    "[{}]",
-                    utils::join(array.iter(), |expr| expr.to_string())
-                )
+                write!(f, "[{}]", utils::join(array.iter(), ToString::to_string))
             }
             Self::Null => f.write_str("null"),
             Self::Returned(obj) => write!(f, "{obj}"),
             Self::Function(function) => write!(f, "{function}"),
             Self::Builtin(func) => write!(f, "builtin({func:?})"),
-            Self::Error(s) => write!(f, "{s}"),
         }
     }
 }
@@ -222,7 +210,7 @@ pub struct Function {
 
 impl Function {
     pub fn new(parameters: Vec<Ident>, body: Block, env: Rc<RefCell<Environment>>) -> Self {
-        Function {
+        Self {
             parameters,
             body,
             env,
@@ -241,11 +229,12 @@ impl Display for Function {
     }
 }
 
+// Not showing env to avoid recursion (an function env can point to an env containing the function)
 impl Debug for Function {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("Function")
             .field("parameters", &self.parameters)
             .field("body", &self.body)
-            .finish()
+            .finish_non_exhaustive()
     }
 }

@@ -6,6 +6,7 @@ use object::{error, null, Object};
 
 use super::ast::{Block, Expr, Literal, Operator, Program, Stmt};
 
+#[allow(clippy::module_name_repetitions)]
 pub mod builtin;
 pub mod env;
 pub mod object;
@@ -58,7 +59,7 @@ impl Evaluator {
                 let val = self.eval_expr(expr);
                 check!(val);
 
-                self.env.borrow_mut().set(name, val.clone())
+                self.env.borrow_mut().set(name, val)
             }
         }
     }
@@ -73,7 +74,7 @@ impl Evaluator {
             Expr::Prefix(op, expr) => {
                 let right = self.eval_expr(*expr);
                 check!(right);
-                self.eval_prefix(op, right)
+                Self::eval_prefix(&op, &right)
             }
             Expr::Infix(left, op, right) => {
                 let left = self.eval_expr(*left);
@@ -81,7 +82,7 @@ impl Evaluator {
                 let right = self.eval_expr(*right);
                 check!(right);
 
-                self.eval_infix(left, op, right)
+                Self::eval_infix(left, &op, right)
             }
             Expr::If {
                 cond,
@@ -100,15 +101,10 @@ impl Evaluator {
                     null!()
                 }
             }
-            Expr::Ident(name) => {
-                if let Some(obj) = self.env.borrow().get(&name) {
-                    obj.clone()
-                } else if let Some(builtin) = BuiltinFunctions::get(&name) {
-                    builtin
-                } else {
-                    error!("identifier not found: {name}")
-                }
-            }
+            Expr::Ident(name) => self.env.borrow().get(&name).unwrap_or_else(|| {
+                BuiltinFunctions::get(&name)
+                    .unwrap_or_else(|| error!("identifier not found: {name}"))
+            }),
             Expr::FunctionLiteral { parameters, body } => {
                 Object::function(parameters, body, Rc::clone(&self.env))
             }
@@ -124,7 +120,7 @@ impl Evaluator {
                     let first = args.first().unwrap().clone();
                     check!(first);
                 }
-                self.apply_function(function, args)
+                self.apply_function(function, &args)
             }
             Expr::Array(array) => {
                 let elements = self.eval_expr_list(&array);
@@ -147,12 +143,12 @@ impl Evaluator {
         }
     }
 
-    fn apply_function(&mut self, function: Object, args: Vec<Object>) -> Object {
+    fn apply_function(&mut self, function: Object, args: &[Object]) -> Object {
         match function {
             Object::Function(function) => {
                 let old_env = Rc::clone(&self.env);
 
-                let extented_env = Self::extend_fn_env(function.parameters, function.env, args);
+                let extented_env = Self::extend_fn_env(&function.parameters, function.env, args);
                 self.env = Rc::new(RefCell::new(extented_env));
                 let evaluated = self.eval_block(function.body);
                 self.env = old_env;
@@ -165,9 +161,9 @@ impl Evaluator {
     }
 
     fn extend_fn_env(
-        params: Vec<String>,
+        params: &[String],
         env: Rc<RefCell<Environment>>,
-        args: Vec<Object>,
+        args: &[Object],
     ) -> Environment {
         let mut env = Environment::enclosed_env(env);
 
@@ -203,7 +199,7 @@ impl Evaluator {
         result
     }
 
-    fn eval_infix(&mut self, left: Object, op: Operator, right: Object) -> Object {
+    fn eval_infix(left: Object, op: &Operator, right: Object) -> Object {
         match op {
             Operator::Plus => left + right,
             Operator::Minus => left - right,
@@ -217,7 +213,7 @@ impl Evaluator {
         }
     }
 
-    fn eval_prefix(&mut self, op: Operator, right: Object) -> Object {
+    fn eval_prefix(op: &Operator, right: &Object) -> Object {
         match op {
             Operator::Bang => match right {
                 Object::Boolean(b) => Object::Boolean(!b),
@@ -317,7 +313,7 @@ mod test {
             ("{5: 5}[5]", Object::Integer(5)),
             ("{true: 5}[true]", Object::Integer(5)),
             ("{false: 5}[false]", Object::Integer(5)),
-        ])
+        ]);
     }
 
     #[test]
