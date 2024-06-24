@@ -90,7 +90,6 @@ impl Object {
                         if idx >= array.len() {
                             return null!();
                         }
-                        println!("idx:{idx} max:{}", array.len());
 
                         array[idx].clone()
                     }

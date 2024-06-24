@@ -27,7 +27,7 @@ macro_rules! add_builtins {
 
 impl BuiltinFunctions {
     pub fn get(name: &str) -> Option<Object> {
-        add_builtins!(name, "len", len, "first", first, "last", last, "rest", rest, "push", push)
+        add_builtins!(name, "len", len, "first", first, "last", last, "rest", rest, "push", push, "puts", puts, "type", get_type)
     }
 }
 
@@ -100,4 +100,17 @@ fn push(args: Vec<Object>) -> Object {
         }
         obj => error!("argument to 'push' must be ARRAY, got {}", obj.get_type()),
     }
+}
+
+fn puts(args: Vec<Object>) -> Object {
+    for arg in args {
+        println!("{arg}");
+    }
+    null!()
+}
+
+fn get_type(args: Vec<Object>) -> Object {
+    check_arg_count!(args, 1, "1");
+
+    Object::String(args.first().unwrap().get_type())
 }
