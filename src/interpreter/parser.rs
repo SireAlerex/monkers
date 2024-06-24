@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use super::{
-    ast::{Block, Expr, Ident, InfixParseFn, Operator, PrefixParseFn, Program, Stmt},
+    ast::{Block, Expr, Ident, InfixParseFn, Literal, Operator, PrefixParseFn, Program, Stmt},
     lexer::Lexer,
     token::{Keyword, Token, TokenKind},
 };
@@ -70,7 +70,7 @@ fn parse_ident(parser: &mut Parser) -> Expr {
 
 fn parse_int_literal(parser: &mut Parser) -> Expr {
     if let TokenKind::Int(x) = &parser.cur_token.kind {
-        Expr::IntLiteral(*x)
+        Expr::Literal(Literal::Int(*x))
     } else {
         panic!("should never happen")
     }
@@ -115,7 +115,9 @@ fn parse_infix(parser: &mut Parser, left: Expr) -> Expr {
 }
 
 fn parse_boolean(parser: &mut Parser) -> Expr {
-    Expr::BooleanLiteral(parser.cur_token_is(&TokenKind::Key(Keyword::True)))
+    Expr::Literal(Literal::Boolean(
+        parser.cur_token_is(&TokenKind::Key(Keyword::True)),
+    ))
 }
 
 fn parse_paren(parser: &mut Parser) -> Expr {
@@ -192,7 +194,7 @@ fn parse_call(parser: &mut Parser, function: Expr) -> Expr {
 
 fn parse_string(parser: &mut Parser) -> Expr {
     if let TokenKind::String(ref s) = parser.cur_token.kind {
-        Expr::StringLiteral(s.to_owned())
+        Expr::Literal(Literal::String(s.to_owned()))
     } else {
         panic!("should never happen")
     }
@@ -215,6 +217,38 @@ fn parse_index(parser: &mut Parser, left: Expr) -> Expr {
     } else {
         panic!("no index should never happen");
     }
+}
+
+fn parse_hash(parser: &mut Parser) -> Expr {
+    let mut pairs = Vec::new();
+
+    while !parser.peek_token_is(&TokenKind::RBrace) {
+        parser.next_token();
+        let key = parser
+            .parse_expression(Precedence::Lowest)
+            .expect("deal with error");
+
+        if !parser.expect_peek(&TokenKind::Colon) {
+            panic!("deal with error");
+        }
+
+        parser.next_token();
+        let value = parser
+            .parse_expression(Precedence::Lowest)
+            .expect("deal with error");
+
+        pairs.push((key, value));
+
+        if !parser.peek_token_is(&TokenKind::RBrace) && !parser.expect_peek(&TokenKind::Comma) {
+            panic!("deal with error");
+        }
+    }
+
+    if !parser.expect_peek(&TokenKind::RBrace) {
+        panic!("deal with error");
+    }
+
+    Expr::HashLiteral(pairs)
 }
 
 // TODO: function to return None and add an error
@@ -255,6 +289,7 @@ impl<'a, 'b> Parser<'a> {
         parser.prefix_fns.insert(TokenKind::Minus, parse_prefix);
         parser.prefix_fns.insert(TokenKind::LParen, parse_paren);
         parser.prefix_fns.insert(TokenKind::LBracket, parse_array);
+        parser.prefix_fns.insert(TokenKind::LBrace, parse_hash);
 
         // Infix functions
         parser.infix_fns.insert(TokenKind::Plus, parse_infix);
@@ -504,7 +539,7 @@ impl<'a, 'b> Parser<'a> {
 #[cfg(test)]
 mod test {
     use crate::interpreter::{
-        ast::{Block, Expr, Operator, Stmt},
+        ast::{Block, Expr, Literal, Operator, Stmt},
         lexer::Lexer,
         parser::Parser,
         token::Source,
@@ -538,21 +573,74 @@ mod test {
     }
 
     #[test]
+    fn hash_test() {
+        check_tests(&[
+            (
+                "{\"one\": 1, \"two\": 2, \"three\": 3}",
+                Stmt::Expr(Expr::HashLiteral(vec![
+                    (
+                        Expr::Literal(Literal::String("one".to_owned())),
+                        Expr::Literal(Literal::Int(1)),
+                    ),
+                    (
+                        Expr::Literal(Literal::String("two".to_owned())),
+                        Expr::Literal(Literal::Int(2)),
+                    ),
+                    (
+                        Expr::Literal(Literal::String("three".to_owned())),
+                        Expr::Literal(Literal::Int(3)),
+                    ),
+                ])),
+            ),
+            ("{}", Stmt::Expr(Expr::HashLiteral(vec![]))),
+            (
+                "{\"one\": 0+1, \"two\": 10-8, \"three\": 15/5}",
+                Stmt::Expr(Expr::HashLiteral(vec![
+                    (
+                        Expr::Literal(Literal::String("one".to_owned())),
+                        Expr::Infix(
+                            Box::new(Expr::Literal(Literal::Int(0))),
+                            Operator::Plus,
+                            Box::new(Expr::Literal(Literal::Int(1))),
+                        ),
+                    ),
+                    (
+                        Expr::Literal(Literal::String("two".to_owned())),
+                        Expr::Infix(
+                            Box::new(Expr::Literal(Literal::Int(10))),
+                            Operator::Minus,
+                            Box::new(Expr::Literal(Literal::Int(8))),
+                        ),
+                    ),
+                    (
+                        Expr::Literal(Literal::String("three".to_owned())),
+                        Expr::Infix(
+                            Box::new(Expr::Literal(Literal::Int(15))),
+                            Operator::Slash,
+                            Box::new(Expr::Literal(Literal::Int(5))),
+                        ),
+                    ),
+                ])),
+            ),
+        ]);
+    }
+
+    #[test]
     fn array_test() {
         check_tests(&[
             (
                 "[1, 2 * 2, 3 + 3]",
                 Stmt::Expr(Expr::Array(vec![
-                    Expr::IntLiteral(1),
+                    Expr::Literal(Literal::Int(1)),
                     Expr::Infix(
-                        Box::new(Expr::IntLiteral(2)),
+                        Box::new(Expr::Literal(Literal::Int(2))),
                         Operator::Asterisk,
-                        Box::new(Expr::IntLiteral(2)),
+                        Box::new(Expr::Literal(Literal::Int(2))),
                     ),
                     Expr::Infix(
-                        Box::new(Expr::IntLiteral(3)),
+                        Box::new(Expr::Literal(Literal::Int(3))),
                         Operator::Plus,
-                        Box::new(Expr::IntLiteral(3)),
+                        Box::new(Expr::Literal(Literal::Int(3))),
                     ),
                 ])),
             ),
@@ -561,9 +649,9 @@ mod test {
                 Stmt::Expr(Expr::Index(
                     Box::new(Expr::Ident("myArray".to_string())),
                     Box::new(Expr::Infix(
-                        Box::new(Expr::IntLiteral(2)),
+                        Box::new(Expr::Literal(Literal::Int(2))),
                         Operator::Plus,
-                        Box::new(Expr::IntLiteral(1)),
+                        Box::new(Expr::Literal(Literal::Int(1))),
                     )),
                 )),
             ),
@@ -574,7 +662,7 @@ mod test {
     fn string_literal_test() {
         let tests = [(
             "\"hello world\";",
-            Stmt::Expr(Expr::StringLiteral("hello world".to_string())),
+            Stmt::Expr(Expr::Literal(Literal::String("hello world".to_string()))),
         )];
 
         check_tests(&tests);
@@ -587,16 +675,16 @@ mod test {
             Stmt::Expr(Expr::Call {
                 function: Box::new(Expr::Ident("add".to_owned())),
                 arguments: vec![
-                    Expr::IntLiteral(1),
+                    Expr::Literal(Literal::Int(1)),
                     Expr::Infix(
-                        Box::new(Expr::IntLiteral(2)),
+                        Box::new(Expr::Literal(Literal::Int(2))),
                         Operator::Asterisk,
-                        Box::new(Expr::IntLiteral(3)),
+                        Box::new(Expr::Literal(Literal::Int(3))),
                     ),
                     Expr::Infix(
-                        Box::new(Expr::IntLiteral(4)),
+                        Box::new(Expr::Literal(Literal::Int(4))),
                         Operator::Plus,
-                        Box::new(Expr::IntLiteral(5)),
+                        Box::new(Expr::Literal(Literal::Int(5))),
                     ),
                 ],
             }),
@@ -687,8 +775,8 @@ mod test {
         let inputs = ["true", "false"];
 
         let tests = vec![
-            Stmt::Expr(Expr::BooleanLiteral(true)),
-            Stmt::Expr(Expr::BooleanLiteral(false)),
+            Stmt::Expr(Expr::Literal(Literal::Boolean(true))),
+            Stmt::Expr(Expr::Literal(Literal::Boolean(false))),
         ];
 
         for (input, expected) in inputs.iter().zip(tests) {
@@ -749,6 +837,7 @@ mod test {
                 "add(a * b[2], b[1], 2 * [1, 2][1])",
                 "add((a * (b[2])), (b[1]), (2 * ([1, 2][1])))",
             ),
+            ("{1: 2, true: 5}", "{1: 2, true: 5}"),
         ];
 
         for test in tests {
@@ -777,59 +866,59 @@ mod test {
 
         let tests = vec![
             Stmt::Expr(Expr::Infix(
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
                 Operator::Plus,
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
             )),
             Stmt::Expr(Expr::Infix(
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
                 Operator::Minus,
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
             )),
             Stmt::Expr(Expr::Infix(
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
                 Operator::Asterisk,
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
             )),
             Stmt::Expr(Expr::Infix(
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
                 Operator::Slash,
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
             )),
             Stmt::Expr(Expr::Infix(
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
                 Operator::Greater,
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
             )),
             Stmt::Expr(Expr::Infix(
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
                 Operator::Less,
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
             )),
             Stmt::Expr(Expr::Infix(
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
                 Operator::Equal,
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
             )),
             Stmt::Expr(Expr::Infix(
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
                 Operator::NotEqual,
-                Box::new(Expr::IntLiteral(5)),
+                Box::new(Expr::Literal(Literal::Int(5))),
             )),
             Stmt::Expr(Expr::Infix(
-                Box::new(Expr::BooleanLiteral(true)),
+                Box::new(Expr::Literal(Literal::Boolean(true))),
                 Operator::Equal,
-                Box::new(Expr::BooleanLiteral(true)),
+                Box::new(Expr::Literal(Literal::Boolean(true))),
             )),
             Stmt::Expr(Expr::Infix(
-                Box::new(Expr::BooleanLiteral(true)),
+                Box::new(Expr::Literal(Literal::Boolean(true))),
                 Operator::NotEqual,
-                Box::new(Expr::BooleanLiteral(false)),
+                Box::new(Expr::Literal(Literal::Boolean(false))),
             )),
             Stmt::Expr(Expr::Infix(
-                Box::new(Expr::BooleanLiteral(false)),
+                Box::new(Expr::Literal(Literal::Boolean(false))),
                 Operator::Equal,
-                Box::new(Expr::BooleanLiteral(false)),
+                Box::new(Expr::Literal(Literal::Boolean(false))),
             )),
         ];
 
@@ -848,18 +937,21 @@ mod test {
         let inputs = ["!5", "-15", "!true", "!false"];
 
         let tests = vec![
-            Stmt::Expr(Expr::Prefix(Operator::Bang, Box::new(Expr::IntLiteral(5)))),
+            Stmt::Expr(Expr::Prefix(
+                Operator::Bang,
+                Box::new(Expr::Literal(Literal::Int(5))),
+            )),
             Stmt::Expr(Expr::Prefix(
                 Operator::Minus,
-                Box::new(Expr::IntLiteral(15)),
+                Box::new(Expr::Literal(Literal::Int(15))),
             )),
             Stmt::Expr(Expr::Prefix(
                 Operator::Bang,
-                Box::new(Expr::BooleanLiteral(true)),
+                Box::new(Expr::Literal(Literal::Boolean(true))),
             )),
             Stmt::Expr(Expr::Prefix(
                 Operator::Bang,
-                Box::new(Expr::BooleanLiteral(false)),
+                Box::new(Expr::Literal(Literal::Boolean(false))),
             )),
         ];
 
@@ -908,8 +1000,8 @@ mod test {
         assert_eq!(program.0.len(), 2);
 
         let tests = vec![
-            Stmt::Expr(Expr::IntLiteral(5)),
-            Stmt::Expr(Expr::IntLiteral(65987314)),
+            Stmt::Expr(Expr::Literal(Literal::Int(5))),
+            Stmt::Expr(Expr::Literal(Literal::Int(65987314))),
         ];
 
         for (res, expected) in program.0.iter().zip(tests) {
@@ -931,9 +1023,9 @@ mod test {
         assert_eq!(program.0.len(), 3);
 
         let tests = vec![
-            Stmt::Let("x".to_owned(), Expr::IntLiteral(5)),
-            Stmt::Let("y".to_owned(), Expr::BooleanLiteral(true)),
-            Stmt::Let("foobar".to_owned(), Expr::IntLiteral(838383)),
+            Stmt::Let("x".to_owned(), Expr::Literal(Literal::Int(5))),
+            Stmt::Let("y".to_owned(), Expr::Literal(Literal::Boolean(true))),
+            Stmt::Let("foobar".to_owned(), Expr::Literal(Literal::Int(838383))),
         ];
         for (res, expected) in program.0.iter().zip(tests) {
             assert_eq!(*res, expected);
@@ -954,9 +1046,9 @@ mod test {
         assert_eq!(program.0.len(), 3);
 
         let tests = vec![
-            Stmt::Return(Expr::IntLiteral(5)),
-            Stmt::Return(Expr::BooleanLiteral(false)),
-            Stmt::Return(Expr::IntLiteral(993322)),
+            Stmt::Return(Expr::Literal(Literal::Int(5))),
+            Stmt::Return(Expr::Literal(Literal::Boolean(false))),
+            Stmt::Return(Expr::Literal(Literal::Int(993322))),
         ];
         for (res, expected) in program.0.iter().zip(tests) {
             assert_eq!(*res, expected);

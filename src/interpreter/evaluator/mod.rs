@@ -1,10 +1,10 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use builtin::BuiltinFunctions;
 use env::Environment;
 use object::{error, null, Object};
 
-use super::ast::{Block, Expr, Operator, Program, Stmt};
+use super::ast::{Block, Expr, Literal, Operator, Program, Stmt};
 
 pub mod builtin;
 pub mod env;
@@ -65,8 +65,11 @@ impl Evaluator {
 
     fn eval_expr(&mut self, expr: Expr) -> Object {
         match expr {
-            Expr::IntLiteral(x) => Object::Integer(x),
-            Expr::BooleanLiteral(bool) => Object::Boolean(bool),
+            Expr::Literal(lit) => match lit {
+                Literal::Int(x) => Object::Integer(x),
+                Literal::Boolean(b) => Object::Boolean(b),
+                Literal::String(s) => Object::String(s),
+            },
             Expr::Prefix(op, expr) => {
                 let right = self.eval_expr(*expr);
                 check!(right);
@@ -123,7 +126,6 @@ impl Evaluator {
                 }
                 self.apply_function(function, args)
             }
-            Expr::StringLiteral(s) => Object::String(s),
             Expr::Array(array) => {
                 let elements = self.eval_expr_list(&array);
                 if elements.len() == 1 {
@@ -141,6 +143,7 @@ impl Evaluator {
 
                 left.get(&index)
             }
+            Expr::HashLiteral(hash) => self.eval_hash(hash),
         }
     }
 
@@ -231,14 +234,34 @@ impl Evaluator {
             _ => error!("unknown operator: {op}{right:?}"),
         }
     }
+
+    fn eval_hash(&mut self, pairs: Vec<(Expr, Expr)>) -> Object {
+        let mut hash = HashMap::new();
+        for (key, value) in pairs {
+            let evaluated_key = self.eval_expr(key);
+            if let Some(key) = evaluated_key.into_literal() {
+                let value = self.eval_expr(value);
+                check!(value);
+
+                hash.insert(key, value);
+            } else {
+                return error!(
+                    "only INTEGER, STRING and BOOLEAN are hashable, received: {}",
+                    evaluated_key.get_type()
+                );
+            }
+        }
+
+        Object::Hash(hash)
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use std::{cell::RefCell, rc::Rc};
+    use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
     use crate::interpreter::{
-        ast::{Block, Expr, Operator, Stmt},
+        ast::{Block, Expr, Literal, Operator, Stmt},
         evaluator::Evaluator,
         lexer::Lexer,
         parser::Parser,
@@ -262,6 +285,39 @@ mod test {
             assert_eq!(object, test.1);
             assert_eq!(test.1, object);
         }
+    }
+
+    #[test]
+    fn hash_test() {
+        let mut hash = HashMap::new();
+        hash.insert(Literal::String("one".to_owned()), Object::Integer(1));
+        hash.insert(Literal::String("two".to_owned()), Object::Integer(2));
+        hash.insert(Literal::String("three".to_owned()), Object::Integer(3));
+        hash.insert(Literal::Int(4), Object::Integer(4));
+        hash.insert(Literal::Boolean(true), Object::Integer(5));
+        hash.insert(Literal::Boolean(false), Object::Integer(6));
+
+        check_tests(&[
+            (
+                "let two = \"two\";
+            {
+                \"one\": 10 - 9,
+                two: 1 + 1,
+                \"thr\" + \"ee\": 6 / 2,
+                4: 4,
+                true: 5,
+                false: 6
+            }",
+                Object::Hash(hash),
+            ),
+            ("{\"foo\": 5}[\"foo\"]", Object::Integer(5)),
+            ("{\"foo\": 5}[\"bar\"]", Object::Null),
+            ("let key = \"foo\"; {\"foo\": 5}[key]", Object::Integer(5)),
+            ("{}[\"foo\"]", Object::Null),
+            ("{5: 5}[5]", Object::Integer(5)),
+            ("{true: 5}[true]", Object::Integer(5)),
+            ("{false: 5}[false]", Object::Integer(5)),
+        ])
     }
 
     #[test]
@@ -419,7 +475,7 @@ mod test {
                 body: Block(vec![Stmt::Expr(Expr::Infix(
                     Box::new(Expr::Ident("x".to_owned())),
                     Operator::Plus,
-                    Box::new(Expr::IntLiteral(2)),
+                    Box::new(Expr::Literal(Literal::Int(2))),
                 ))]),
                 env: Rc::new(RefCell::new(Environment::new())),
             }),
@@ -484,6 +540,10 @@ mod test {
             (
                 "\"Hello\" - \"World\";",
                 Object::Error("unknown operator: STRING - STRING".to_string()),
+            ),
+            (
+                "{\"name\": \"Monkey\"}[fn(x) { x }];",
+                Object::Error("unusable as hash key: FUNCTION".to_string()),
             ),
         ];
 

@@ -1,12 +1,13 @@
 use std::{
     cell::RefCell,
+    collections::HashMap,
     fmt::{Debug, Display},
     ops::{Add, Div, Mul, Sub},
     rc::Rc,
 };
 
 use crate::{
-    interpreter::ast::{Block, Ident},
+    interpreter::ast::{Block, Ident, Literal},
     utils,
 };
 
@@ -48,6 +49,7 @@ pub enum Object {
     Integer(i64),
     Boolean(bool),
     String(String),
+    Hash(HashMap<Literal, Object>),
     Array(Vec<Object>),
     Returned(Box<Object>),
     Null,
@@ -93,6 +95,17 @@ impl Object {
                         array[idx].clone()
                     }
                     Err(err) => error!("size can't be a 64bit integer ({err})"),
+                }
+            }
+            (Object::Hash(hash), _) => {
+                if let Some(key) = index.into_literal() {
+                    if let Some(obj) = hash.get(&key) {
+                        obj.clone()
+                    } else {
+                        null!()
+                    }
+                } else {
+                    error!("unusable as hash key: {}", index.get_type())
                 }
             }
             (_, _) => error!(
@@ -148,6 +161,7 @@ impl Object {
             Object::Integer(_) => String::from("INTEGER"),
             Object::Boolean(_) => String::from("BOOLEAN"),
             Object::String(_) => String::from("STRING"),
+            Object::Hash(_) => String::from("HASH"),
             Object::Array(_) => String::from("ARRAY"),
             Object::Returned(obj) => format!("RETURNED({})", obj.get_type()),
             Object::Null => String::from("NULL"),
@@ -160,6 +174,15 @@ impl Object {
     pub fn is_error(&self) -> bool {
         matches!(self, Self::Error(_))
     }
+
+    pub fn into_literal(&self) -> Option<Literal> {
+        match self {
+            Object::Integer(x) => Some(Literal::Int(*x)),
+            Object::String(s) => Some(Literal::String(s.to_owned())),
+            Object::Boolean(b) => Some(Literal::Boolean(*b)),
+            _ => None,
+        }
+    }
 }
 
 impl Display for Object {
@@ -168,7 +191,20 @@ impl Display for Object {
             Self::Integer(x) => write!(f, "{x}"),
             Self::Boolean(bool) => write!(f, "{bool}"),
             Self::String(s) => write!(f, "{s}"),
-            Self::Array(array) => write!(f, "{}", utils::join(array)),
+            Self::Hash(hash) => {
+                write!(
+                    f,
+                    "{{{}}}",
+                    utils::join(hash.iter(), |(key, value)| format!("{key}: {value}"))
+                )
+            }
+            Self::Array(array) => {
+                write!(
+                    f,
+                    "[{}]",
+                    utils::join(array.iter(), |expr| expr.to_string())
+                )
+            }
             Self::Null => f.write_str("null"),
             Self::Returned(obj) => write!(f, "{obj}"),
             Self::Function(function) => write!(f, "{function}"),

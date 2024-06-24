@@ -44,7 +44,7 @@ impl<'a> Lexer<'a> {
             Some((_, '=')) => {
                 if self.peek_char() == Some('=') {
                     self.read_char();
-                    Token::new(TokenKind::EQ, data.0, data.1, Rc::clone(&data.2))
+                    token!(data, TokenKind::EQ)
                 } else {
                     token!(data, TokenKind::Assign)
                 }
@@ -71,6 +71,7 @@ impl<'a> Lexer<'a> {
             Some((_, '}')) => token!(data, TokenKind::RBrace),
             Some((_, '[')) => token!(data, TokenKind::LBracket),
             Some((_, ']')) => token!(data, TokenKind::RBracket),
+            Some((_, ':')) => token!(data, TokenKind::Colon),
             Some((_, '"')) => {
                 if let Some(s) = self.read_string() {
                     token!(data, TokenKind::String(s))
@@ -216,7 +217,7 @@ mod test {
         \"foo\\t bar\"
         \"foo\\nbar\"
         [1, 2];
-        ";
+        {\"foo\": \"bar\"}";
 
         let expected_tokens = [
             TokenKind::Key(Keyword::Let),
@@ -301,6 +302,11 @@ mod test {
             TokenKind::Int(2),
             TokenKind::RBracket,
             TokenKind::Semicolon,
+            TokenKind::LBrace,
+            TokenKind::String(String::from("foo")),
+            TokenKind::Colon,
+            TokenKind::String(String::from("bar")),
+            TokenKind::RBrace,
             TokenKind::EOF,
         ];
 

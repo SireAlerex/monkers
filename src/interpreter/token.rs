@@ -65,6 +65,7 @@ pub enum TokenKind {
     RBrace,
     LBracket,
     RBracket,
+    Colon,
     Key(Keyword),
     String(String),
 }

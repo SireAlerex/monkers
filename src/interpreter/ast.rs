@@ -21,9 +21,8 @@ pub type Ident = String;
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
 pub enum Expr {
     Ident(Ident),
-    IntLiteral(i64),
-    BooleanLiteral(bool),
-    StringLiteral(String),
+    Literal(Literal),
+    HashLiteral(Vec<(Expr, Expr)>),
     Array(Vec<Expr>),
     Index(Box<Expr>, Box<Expr>),
     Prefix(Operator, Box<Expr>),
@@ -41,6 +40,13 @@ pub enum Expr {
         function: Box<Expr>,
         arguments: Vec<Expr>,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash)]
+pub enum Literal {
+    Int(i64),
+    Boolean(bool),
+    String(String),
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd)]
@@ -84,10 +90,12 @@ impl Display for Expr {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let s = match self {
             Self::Ident(ident) => ident.clone(),
-            Self::IntLiteral(int) => int.to_string(),
-            Self::BooleanLiteral(bool) => bool.to_string(),
-            Self::StringLiteral(s) => s.to_string(),
-            Self::Array(vec) => format!("[{}]", utils::join(vec)),
+            Self::Literal(lit) => lit.to_string(),
+            Self::HashLiteral(hash) => format!(
+                "{{{}}}",
+                utils::join(hash.iter(), |(key, value)| format!("{key}: {value}"))
+            ),
+            Self::Array(vec) => format!("[{}]", utils::join(vec.iter(), |expr| expr.to_string())),
             Self::Index(left, index) => format!("({left}[{index}])"),
             Self::Prefix(op, expr) => format!("({op}{expr})"),
             Self::Infix(left, op, right) => format!("({left} {op} {right})"),
@@ -110,10 +118,23 @@ impl Display for Expr {
                 function,
                 arguments,
             } => {
-                format!("{function}({})", utils::join(arguments))
+                format!(
+                    "{function}({})",
+                    utils::join(arguments.iter(), |expr| expr.to_string())
+                )
             }
         };
         f.write_str(&s)
+    }
+}
+
+impl Display for Literal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Literal::Int(x) => write!(f, "{x}"),
+            Literal::Boolean(b) => write!(f, "{b}"),
+            Literal::String(s) => write!(f, "{s}"),
+        }
     }
 }
 
