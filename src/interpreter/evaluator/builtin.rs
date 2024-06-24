@@ -27,7 +27,10 @@ macro_rules! add_builtins {
 
 impl BuiltinFunctions {
     pub fn get(name: &str) -> Option<Object> {
-        add_builtins!(name, "len", len, "first", first, "last", last, "rest", rest, "push", push, "puts", puts, "type", get_type)
+        add_builtins!(
+            name, "len", len, "first", first, "last", last, "rest", rest, "push", push, "puts",
+            puts, "type", get_type
+        )
     }
 }
 

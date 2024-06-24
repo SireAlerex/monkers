@@ -239,7 +239,7 @@ impl Evaluator {
         let mut hash = HashMap::new();
         for (key, value) in pairs {
             let evaluated_key = self.eval_expr(key);
-            if let Some(key) = evaluated_key.into_literal() {
+            if let Some(key) = evaluated_key.literal() {
                 let value = self.eval_expr(value);
                 check!(value);
 

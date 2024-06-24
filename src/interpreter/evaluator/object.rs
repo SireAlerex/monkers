@@ -97,7 +97,7 @@ impl Object {
                 }
             }
             (Object::Hash(hash), _) => {
-                if let Some(key) = index.into_literal() {
+                if let Some(key) = index.literal() {
                     if let Some(obj) = hash.get(&key) {
                         obj.clone()
                     } else {
@@ -174,7 +174,7 @@ impl Object {
         matches!(self, Self::Error(_))
     }
 
-    pub fn into_literal(&self) -> Option<Literal> {
+    pub fn literal(&self) -> Option<Literal> {
         match self {
             Object::Integer(x) => Some(Literal::Int(*x)),
             Object::String(s) => Some(Literal::String(s.to_owned())),
