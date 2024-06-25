@@ -20,6 +20,8 @@ macro_rules! err {
 pub struct Compiler {
     instructions: Instructions,
     constants: Vec<Object>,
+    last_instruction: Option<EmittedInstruction>,
+    previous_instruction: Option<EmittedInstruction>,
 }
 
 impl Compiler {
@@ -27,6 +29,8 @@ impl Compiler {
         Compiler {
             instructions: Instructions::new(),
             constants: Vec::new(),
+            last_instruction: None,
+            previous_instruction: None,
         }
     }
 
@@ -83,6 +87,37 @@ impl Compiler {
                 Ok(())
             }
             Expr::Literal(lit) => self.compile_literal(&lit),
+            Expr::If { cond, consequence, alternative } => {
+                self.compile_expr(*cond)?;
+
+                // emit JumpNotThruthy with a temp value
+                let jump_not_truthy = self.emit(Op::JumpNotTruthy, &[9999]);
+
+                self.compile(consequence)?;
+                if self.last_instruction_is_pop() {
+                    self.remove_last_pop();
+                }
+
+                // emit Jump with a temp value
+                let jump_pos = self.emit(Op::Jump, &[9999]);
+
+                let after_consequence_pos = self.instructions.0.len();
+                self.change_operand(jump_not_truthy, after_consequence_pos as u64);
+
+                if let Some(block) = alternative {
+                    self.compile(block)?;
+                    if self.last_instruction_is_pop() {
+                        self.remove_last_pop();
+                    }                    
+                } else {
+                    self.emit(Op::Null, &[]);
+                }
+
+                let after_alternative_pos = self.instructions.0.len();
+                self.change_operand(jump_pos, after_alternative_pos as u64);
+
+                Ok(())
+            }
             _ => err!("unimplemented expr: {expr}"),
         }
     }
@@ -109,7 +144,11 @@ impl Compiler {
     }
 
     fn emit(&mut self, op: Op, operands: &[u64]) -> usize {
-        self.add_instruction(&mut op.make(operands))
+        let pos = self.add_instruction(&mut op.make(operands));
+
+        self.set_last_instruction(op, pos);
+
+        pos
     }
 
     fn add_instruction(&mut self, ins: &mut Vec<u8>) -> usize {
@@ -121,6 +160,30 @@ impl Compiler {
     fn add_constant(&mut self, value: Object) -> usize {
         self.constants.push(value);
         self.constants.len() - 1
+    }
+
+    fn change_operand(&mut self, pos: usize, operand: u64) {
+        let op = Op::from_u8(self.instructions.0[pos]);
+        let new = op.make(&[operand]);
+
+        self.instructions.replace(pos, &new);
+    }
+
+    fn set_last_instruction(&mut self, op: Op, pos: usize) {
+        let previous = self.last_instruction;
+        let last = EmittedInstruction {op, pos};
+
+        self.previous_instruction = previous;
+        self.last_instruction = Some(last);
+    }
+
+    fn last_instruction_is_pop(&self) -> bool {
+        self.last_instruction.unwrap().op == Op::Pop
+    }
+
+    fn remove_last_pop(&mut self) {
+        self.instructions.remove_last_instruction(self.last_instruction.unwrap().pos);
+        self.last_instruction = self.previous_instruction;
     }
 
     pub fn byte_code(&self) -> ByteCode {
@@ -135,6 +198,12 @@ impl Compiler {
 pub struct ByteCode {
     pub instructions: Instructions,
     pub constants: Vec<Object>,
+}
+
+#[derive(Debug, Clone, Copy)]
+struct EmittedInstruction {
+    op: Op,
+    pos: usize
 }
 
 #[cfg(test)]
@@ -167,14 +236,17 @@ mod test {
 
             if byte_code.instructions.to_string() != flatten(&mut test.2.clone()).to_string() {
                 println!(
-                    "Testing input: '{}'\nGot bytecode:\n{}\n\nWanted bytecode:\n{}",
+                    "Testing input: '{}'\nGot bytecode:\n{}\n({:?})\n\nWanted bytecode:\n{}\n({:?})",
                     test.0,
                     byte_code.instructions,
+                    byte_code.instructions,
+                    flatten(&mut test.2.clone()),
                     flatten(&mut test.2.clone())
                 );
             }
 
             assert_eq!(byte_code.constants, test.1);
+            assert_eq!(byte_code.instructions.0.len(), flatten(&mut test.2.clone()).0.len());
             assert_eq!(
                 byte_code.instructions.to_string(),
                 flatten(&mut test.2.clone()).to_string()
@@ -182,6 +254,32 @@ mod test {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn conditional_test() -> Result<(), Box<dyn Error>> {
+        compile_test(&[
+            ("if (true) { 10 }; 3333;", vec![Object::Integer(10), Object::Integer(3333)], vec![
+                Instructions::vec(Op::True.make(&[])),              // 0000
+                Instructions::vec(Op::JumpNotTruthy.make(&[10])),   // 0001
+                Instructions::vec(Op::Constant.make(&[0])),         // 0004
+                Instructions::vec(Op::Jump.make(&[11])),            // 0007
+                Instructions::vec(Op::Null.make(&[])),              // 0010
+                Instructions::vec(Op::Pop.make(&[])),               // 0011
+                Instructions::vec(Op::Constant.make(&[1])),         // 0012
+                Instructions::vec(Op::Pop.make(&[])),               // 0015
+            ]),
+            ("if (true) { 10 } else { 20 }; 3333;", vec![Object::Integer(10), Object::Integer(20), Object::Integer(3333)], vec![
+                Instructions::vec(Op::True.make(&[])),              // 0000
+                Instructions::vec(Op::JumpNotTruthy.make(&[10])),   // 0001
+                Instructions::vec(Op::Constant.make(&[0])),         // 0004
+                Instructions::vec(Op::Jump.make(&[13])),            // 0007
+                Instructions::vec(Op::Constant.make(&[1])),         // 0010
+                Instructions::vec(Op::Pop.make(&[])),               // 0013
+                Instructions::vec(Op::Constant.make(&[2])),         // 0014
+                Instructions::vec(Op::Pop.make(&[])),               // 0017
+            ])
+        ])
     }
 
     #[test]

@@ -31,6 +31,7 @@ const STACK_SIZE: usize = 2048;
 const UNINT_OBJECT: Object = Object::Uninit;
 const TRUE: Object = Object::Boolean(true);
 const FALSE: Object = Object::Boolean(false);
+const NULL: Object = Object::Null;
 
 pub struct VM {
     constants: Vec<Object>,
@@ -88,15 +89,28 @@ impl VM {
                 }
                 Op::GreaterThan => check_binary!(self, greater),
                 Op::Bang => match self.pop() {
-                    TRUE => self.push(FALSE)?,
-                    FALSE => self.push(TRUE)?,
+                    FALSE | NULL => self.push(TRUE)?,
                     _ => self.push(FALSE)?,
                 },
                 Op::Minus => match self.pop() {
                     Object::Integer(a) => self.push(Object::Integer(-a))?,
                     obj => return err!("unsupported type for negation: {}", obj.get_type()),
                 },
-                _ => null!(self)?,
+                Op::Jump => {
+                    let pos = utils::read_u16(&self.instructions.0[ip + 1..]);
+                    ip = pos as usize - 1;
+                }
+                Op::JumpNotTruthy => {
+                    let pos = utils::read_u16(&self.instructions.0[ip + 1..]);
+                    ip += 2;
+
+                    let cond = self.pop();
+                    if !cond.is_truthy() {
+                        ip = pos as usize - 1;
+                    }
+                }
+                Op::Null => null!(self)?,
+                op => err!("'{op:?}' is unimplemented for vm")?,
             }
 
             ip += 1;
@@ -144,6 +158,8 @@ mod test {
         interpreter::{evaluator::object::Object, parser::Parser},
     };
 
+    use super::NULL;
+
     fn vm_test<T>(tests: &[(&str, T)]) -> Result<(), Box<dyn Error>>
     where
         T: Into<Object> + Sized + Clone,
@@ -169,6 +185,25 @@ mod test {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn conditional_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("if (true) { 10 }", 10),
+            ("if (true) { 10 } else { 20 }", 10),
+            ("if (false) { 10 } else { 20 } ", 20),
+            ("if (1) { 10 }", 10),
+            ("if (1 < 2) { 10 }", 10),
+            ("if (1 < 2) { 10 } else { 20 }", 10),
+            ("if (1 > 2) { 10 } else { 20 }", 20),
+            ("if ((if (false) { 10 })) { 10 } else { 20 }", 20)
+        ])?;
+
+        vm_test(&[
+            ("if (false) { 10 }", NULL),
+            ("if (1 > 2) { 10 }", NULL),
+        ])
     }
 
     #[test]
@@ -199,6 +234,7 @@ mod test {
             ("!!true", true),
             ("!!false", false),
             ("!!5", true),
+            ("!(if (false) { 5; })", true)
         ])
     }
 

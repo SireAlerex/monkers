@@ -1,6 +1,6 @@
 use crate::utils;
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 #[repr(u8)]
 pub enum Op {
     Constant,
@@ -16,12 +16,15 @@ pub enum Op {
     GreaterThan,
     Minus,
     Bang,
+    Jump,
+    JumpNotTruthy,
+    Null,
 }
 
 impl Op {
     pub const fn lookup(&self) -> &[u8] {
         match self {
-            Self::Constant => &[2],
+            Self::Constant | Self::Jump | Self::JumpNotTruthy => &[2],
             Self::Add
             | Self::Pop
             | Self::Sub
@@ -33,7 +36,8 @@ impl Op {
             | Self::NotEqual
             | Self::GreaterThan
             | Self::Minus
-            | Self::Bang => &[],
+            | Self::Bang
+            | Self::Null => &[],
         }
     }
 
@@ -52,6 +56,9 @@ impl Op {
             10 => Self::GreaterThan,
             11 => Self::Minus,
             12 => Self::Bang,
+            13 => Self::Jump,
+            14 => Self::JumpNotTruthy,
+            15 => Self::Null,
             _ => panic!(),
         }
     }
