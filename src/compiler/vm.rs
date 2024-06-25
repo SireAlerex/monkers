@@ -10,6 +10,8 @@ macro_rules! null {
 
 const STACK_SIZE: usize = 2048;
 const UNINT_OBJECT: Object = Object::Uninit;
+const TRUE: Object = Object::Boolean(true);
+const FALSE: Object = Object::Boolean(false);
 
 pub struct VM {
     constants: Vec<Object>,
@@ -63,6 +65,8 @@ impl VM {
                 Op::Pop => {
                     _ = self.pop();
                 }
+                Op::True => self.push(TRUE)?,
+                Op::False => self.push(FALSE)?,
                 _ => null!(self)?,
             }
 
@@ -99,5 +103,57 @@ impl VM {
                 .filter(|obj| **obj != Object::Uninit)
                 .collect::<Vec<&Object>>()
         )
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::error::Error;
+
+    use crate::{compiler::{vm::VM, Compiler}, interpreter::{evaluator::object::Object, parser::Parser}};
+
+    fn vm_test<T>(tests: &[(&str, T)]) -> Result<(), Box<dyn Error>>
+    where
+    T: Into<Object> + Sized + Clone
+     {
+        for test in tests {
+            let mut compiler = Compiler::new();
+            compiler.compile(Parser::parse(test.0))?;
+            println!("testing vm for:\n{}", compiler.byte_code().instructions);
+            let mut vm = VM::new(compiler.byte_code());
+            vm.run()?;
+
+            let stack_elem = vm.stack_top();
+            println!("vm stack: {}", vm.show_stack());
+            assert_eq!(stack_elem, test.1.clone().into());
+        }
+
+        Ok(())
+    }
+
+    #[test]
+    fn boolean_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("true", true),
+            ("false", false),
+        ])
+    }
+
+    #[test]
+    fn integer_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("1", 1),
+            ("2", 2),
+            ("1 + 2", 3),
+            ("1 - 2", -1),
+            ("1 * 2", 2),
+            ("4 / 2", 2),
+            ("50 / 2 * 2 + 10 - 5", 55),
+            ("5 + 5 + 5 + 5 - 10", 10),
+            ("2 * 2 * 2 * 2 * 2", 32),
+            ("5 * 2 + 10", 20),
+            ("5 + 2 * 10", 25),
+            ("5 * (2 + 10)", 60),
+        ])
     }
 }

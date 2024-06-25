@@ -526,6 +526,11 @@ impl<'a, 'b> Parser<'a> {
     pub fn is_err(&self) -> bool {
         !self.errors.is_empty()
     }
+
+    // util
+    pub fn parse(input: &str) -> Program {
+        Parser::new(Lexer::new(input, Source::Repl)).parse_program()
+    }
 }
 
 #[allow(clippy::unreadable_literal)]

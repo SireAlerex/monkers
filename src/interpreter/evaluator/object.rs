@@ -204,6 +204,24 @@ impl Display for Object {
     }
 }
 
+impl From<i64> for Object {
+    fn from(value: i64) -> Self {
+        Object::Integer(value)
+    }
+}
+
+impl From<bool> for Object {
+    fn from(value: bool) -> Self {
+        Object::Boolean(value)
+    }
+}
+
+impl From<String> for Object {
+    fn from(value: String) -> Self {
+        Object::String(value)
+    }
+}
+
 #[derive(Clone, PartialEq)]
 pub struct Function {
     pub parameters: Vec<Ident>,

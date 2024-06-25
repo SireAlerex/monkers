@@ -76,6 +76,15 @@ impl Compiler {
                 let _ = self.emit(Op::Constant, &[index as u64]);
                 Ok(())
             }
+            Literal::Boolean(bool) => {
+                let _ = if *bool {
+                    self.emit(Op::True, &[])
+                } else {
+                    self.emit(Op::False, &[])
+                };
+
+                Ok(())
+            }
             _ => err!("unimplemented literal: {lit}"),
         }
     }
@@ -114,17 +123,13 @@ mod test {
     use std::error::Error;
 
     use crate::{
-        compiler::{vm::VM, Compiler},
+        compiler::Compiler,
         interpreter::{
-            ast::Program, evaluator::object::Object, lexer::Lexer, parser::Parser, token::Source,
+            evaluator::object::Object, parser::Parser,
         },
     };
 
     use super::{chunk::Instructions, code::Op};
-
-    fn parse(input: &str) -> Program {
-        Parser::new(Lexer::new(input, Source::Repl)).parse_program()
-    }
 
     fn flatten(vec: &mut Vec<Instructions>) -> Instructions {
         let mut res = Vec::new();
@@ -135,45 +140,36 @@ mod test {
         Instructions::vec(res)
     }
 
-    fn vm_test(tests: &[(&str, Object)]) -> Result<(), Box<dyn Error>> {
+    fn compile_test(tests: &[(&str, Vec<Object>, Vec<Instructions>)]) -> Result<(), Box<dyn Error>>  {
         for test in tests {
             let mut compiler = Compiler::new();
-            compiler.compile(parse(test.0))?;
-            println!("testing vm for:\n{}", compiler.byte_code().instructions);
-            let mut vm = VM::new(compiler.byte_code());
-            vm.run()?;
+            compiler.compile(Parser::parse(test.0))?;
+            let byte_code = compiler.byte_code();
 
-            let stack_elem = vm.stack_top();
-            println!("vm stack: {}", vm.show_stack());
-            assert_eq!(stack_elem, test.1);
+            assert_eq!(byte_code.constants, test.1);
+            assert_eq!(
+                byte_code.instructions.to_string(),
+                flatten(&mut test.2.clone()).to_string()
+            );
         }
 
         Ok(())
     }
 
     #[test]
-    fn integer_test() -> Result<(), Box<dyn Error>> {
-        let tests = &[
-            ("1", Object::Integer(1)),
-            ("2", Object::Integer(2)),
-            ("1 + 2", Object::Integer(3)),
-            ("1 - 2", Object::Integer(-1)),
-            ("1 * 2", Object::Integer(2)),
-            ("4 / 2", Object::Integer(2)),
-            ("50 / 2 * 2 + 10 - 5", Object::Integer(55)),
-            ("5 + 5 + 5 + 5 - 10", Object::Integer(10)),
-            ("2 * 2 * 2 * 2 * 2", Object::Integer(32)),
-            ("5 * 2 + 10", Object::Integer(20)),
-            ("5 + 2 * 10", Object::Integer(25)),
-            ("5 * (2 + 10)", Object::Integer(60)),
-        ];
-        vm_test(tests)
+    fn boolean_test() -> Result<(), Box<dyn Error>> {
+        compile_test(&[
+            ("true", vec![], vec![Instructions::vec(Op::True.make(&[])),
+            Instructions::vec(Op::Pop.make(&[])),]),
+            ("false", vec![], vec![Instructions::vec(Op::False.make(&[])),
+            Instructions::vec(Op::Pop.make(&[])),])
+        ])
     }
 
     #[test]
-    fn compile_test() -> Result<(), Box<dyn Error>> {
+    fn integer_test() -> Result<(), Box<dyn Error>> {
         // TODO add function to take ints and return objects (and other type)
-        let tests = &[
+        compile_test(&[
             (
                 "1 + 2",
                 vec![Object::Integer(1), Object::Integer(2)],
@@ -224,22 +220,7 @@ mod test {
                     Instructions::vec(Op::Pop.make(&[])),
                 ],
             ),
-        ];
-
-        for test in tests {
-            let mut compiler = Compiler::new();
-            compiler.compile(parse(test.0))?;
-            let byte_code = compiler.byte_code();
-
-            assert_eq!(byte_code.constants, test.1);
-            // println!("Got bytecode:\n{}", byte_code.instructions);
-            // println!("\nCorrect bytecode:\n{}", flatten(&mut test.2.clone()));
-            assert_eq!(
-                byte_code.instructions.to_string(),
-                flatten(&mut test.2.clone()).to_string()
-            );
-        }
-        Ok(())
+        ])
     }
 
     #[test]

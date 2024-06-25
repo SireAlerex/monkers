@@ -9,13 +9,15 @@ pub enum Op {
     Sub,
     Mul,
     Div,
+    True,
+    False,
 }
 
 impl Op {
     pub const fn lookup(&self) -> &[u8] {
         match self {
-            Op::Constant => &[2],
-            Op::Add | Op::Pop | Op::Sub | Op::Mul | Op::Div => &[],
+            Self::Constant => &[2],
+            Self::Add | Self::Pop | Self::Sub | Self::Mul | Self::Div | Self::True | Self::False => &[],
         }
     }
 
@@ -27,6 +29,8 @@ impl Op {
             3 => Self::Sub,
             4 => Self::Mul,
             5 => Self::Div,
+            6 => Self::True,
+            7 => Self::False,
             _ => panic!(),
         }
     }
