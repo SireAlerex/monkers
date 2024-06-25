@@ -32,7 +32,7 @@ mod test {
     fn vm_test(tests: &[(&str, Object)]) -> Result<(), Box<dyn Error>> {
         for test in tests {
             let mut compiler = Compiler::new();
-            compiler.compile(parse(test.0));
+            compiler.compile(parse(test.0))?;
             let mut vm = VM::new(compiler.byte_code());
             vm.run()?;
 
@@ -85,7 +85,7 @@ mod test {
     }
 
     #[test]
-    fn compile_test() {
+    fn compile_test() -> Result<(), Box<dyn Error>> {
         // TODO add function to take ints and return objects (and other type)
         let tests = &[(
             "1 + 2",
@@ -99,7 +99,7 @@ mod test {
 
         for test in tests {
             let mut compiler = Compiler::new();
-            compiler.compile(parse(test.0));
+            compiler.compile(parse(test.0))?;
             let byte_code = compiler.byte_code();
 
             assert_eq!(byte_code.constants, test.1);
@@ -110,6 +110,7 @@ mod test {
                 flatten(&mut test.2.clone()).to_string()
             );
         }
+        Ok(())
     }
 
     #[test]

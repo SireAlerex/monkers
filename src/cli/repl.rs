@@ -63,7 +63,7 @@ fn eval_str<W: Write>(
         // }
 
         let mut compiler = Compiler::new();
-        compiler.compile(program);
+        compiler.compile(program)?;
         let mut vm = VM::new(compiler.byte_code());
         vm.run()?;
         if !matches!(vm.stack_top(), Object::Null) {

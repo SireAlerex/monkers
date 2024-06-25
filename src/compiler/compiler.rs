@@ -5,6 +5,12 @@ use crate::interpreter::{
 
 use super::{chunk::Instructions, code::Op};
 
+macro_rules! err {
+    ($($arg:tt)*) => {
+        Err(format!("Compilation error: {}", format!($($arg)*)))
+    };
+}
+
 pub struct Compiler {
     instructions: Instructions,
     constants: Vec<Object>,
@@ -18,45 +24,46 @@ impl Compiler {
         }
     }
 
-    // TODO: return error
-    pub fn compile(&mut self, program: Program) {
+    pub fn compile(&mut self, program: Program) -> Result<(), String> {
         for stmt in program.0 {
-            self.compile_stmt(stmt);
+            self.compile_stmt(stmt)?;
         }
+        Ok(())
     }
 
-    fn compile_stmt(&mut self, stmt: Stmt) {
+    fn compile_stmt(&mut self, stmt: Stmt) -> Result<(), String> {
         match stmt {
-            Stmt::Return(_) => todo!(),
-            Stmt::Let(_, _) => todo!(),
             Stmt::Expr(expr) => self.compile_expr(expr),
+            _ => err!("unimplemented stmt: {stmt}")
         }
     }
 
-    fn compile_expr(&mut self, expr: Expr) {
+    fn compile_expr(&mut self, expr: Expr) -> Result<(), String> {
         match expr {
             Expr::Infix(left, operator, right) => {
-                self.compile_expr(*left);
-                self.compile_expr(*right);
+                self.compile_expr(*left)?;
+                self.compile_expr(*right)?;
 
                 let _ = match operator {
                     Operator::Plus => self.emit(Op::Add, &[]),
-                    _ => panic!("unimplemented infix operator"),
+                    _ => return err!("unimplemented infix operator: {operator}")
                 };
+                Ok(())
             }
             Expr::Literal(lit) => self.compile_literal(lit),
-            _ => todo!(),
+            _ => err!("unimplemented expr: {expr}")
         }
     }
 
-    fn compile_literal(&mut self, lit: Literal) {
+    fn compile_literal(&mut self, lit: Literal) -> Result<(), String> {
         match lit {
             Literal::Int(x) => {
                 let integer = Object::Integer(x);
                 let index = self.add_constant(integer);
                 let _ = self.emit(Op::Constant, &[index as u64]);
+                Ok(())
             }
-            _ => todo!(),
+            _ => err!("unimplemented literal: {lit}")
         }
     }
 
