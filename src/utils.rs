@@ -5,7 +5,7 @@ where
     array.map(f).collect::<Vec<String>>().join(", ")
 }
 
-pub fn read_u16(ins: &[u8]) -> u16 {
+pub const fn read_u16(ins: &[u8]) -> u16 {
     ((ins[0] as u16) << 8) | (ins[1] as u16)
 }
 

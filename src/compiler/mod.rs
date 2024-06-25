@@ -1,14 +1,120 @@
+use crate::interpreter::{
+    ast::{Expr, Literal, Operator, Program, Stmt},
+    evaluator::object::Object,
+};
+
+use chunk::Instructions;
+use code::Op;
+
 pub mod chunk;
 pub mod code;
-pub mod compiler;
+// pub mod compiler;
 pub mod vm;
+
+macro_rules! err {
+    ($($arg:tt)*) => {
+        Err(format!("Compilation error: {}", format!($($arg)*)))
+    };
+}
+
+pub struct Compiler {
+    instructions: Instructions,
+    constants: Vec<Object>,
+}
+
+impl Compiler {
+    pub fn new() -> Self {
+        Compiler {
+            instructions: Instructions::new(),
+            constants: Vec::new(),
+        }
+    }
+
+    pub fn compile(&mut self, program: Program) -> Result<(), String> {
+        for stmt in program.0 {
+            self.compile_stmt(stmt)?;
+        }
+        Ok(())
+    }
+
+    fn compile_stmt(&mut self, stmt: Stmt) -> Result<(), String> {
+        match stmt {
+            Stmt::Expr(expr) => {
+                let res = self.compile_expr(expr);
+                let _ = self.emit(Op::Pop, &[]);
+                res
+            }
+            _ => err!("unimplemented stmt: {stmt}"),
+        }
+    }
+
+    fn compile_expr(&mut self, expr: Expr) -> Result<(), String> {
+        match expr {
+            Expr::Infix(left, operator, right) => {
+                self.compile_expr(*left)?;
+                self.compile_expr(*right)?;
+
+                let _ = match operator {
+                    Operator::Plus => self.emit(Op::Add, &[]),
+                    Operator::Minus => self.emit(Op::Sub, &[]),
+                    Operator::Asterisk => self.emit(Op::Mul, &[]),
+                    Operator::Slash => self.emit(Op::Div, &[]),
+                    _ => return err!("unimplemented infix operator: {operator}"),
+                };
+                Ok(())
+            }
+            Expr::Literal(lit) => self.compile_literal(&lit),
+            _ => err!("unimplemented expr: {expr}"),
+        }
+    }
+
+    fn compile_literal(&mut self, lit: &Literal) -> Result<(), String> {
+        match lit {
+            Literal::Int(x) => {
+                let integer = Object::Integer(*x);
+                let index = self.add_constant(integer);
+                let _ = self.emit(Op::Constant, &[index as u64]);
+                Ok(())
+            }
+            _ => err!("unimplemented literal: {lit}"),
+        }
+    }
+
+    fn emit(&mut self, op: Op, operands: &[u64]) -> usize {
+        self.add_instruction(&mut op.make(operands))
+    }
+
+    fn add_instruction(&mut self, ins: &mut Vec<u8>) -> usize {
+        let pos_new_ins = self.instructions.0.len();
+        self.instructions.0.append(ins);
+        pos_new_ins
+    }
+
+    fn add_constant(&mut self, value: Object) -> usize {
+        self.constants.push(value);
+        self.constants.len() - 1
+    }
+
+    pub fn byte_code(&self) -> ByteCode {
+        // TODO keep clone ?
+        ByteCode {
+            instructions: self.instructions.clone(),
+            constants: self.constants.clone(),
+        }
+    }
+}
+
+pub struct ByteCode {
+    pub instructions: Instructions,
+    pub constants: Vec<Object>,
+}
 
 #[cfg(test)]
 mod test {
     use std::error::Error;
 
     use crate::{
-        compiler::{compiler::Compiler, vm::VM},
+        compiler::{vm::VM, Compiler},
         interpreter::{
             ast::Program, evaluator::object::Object, lexer::Lexer, parser::Parser, token::Source,
         },
@@ -33,10 +139,12 @@ mod test {
         for test in tests {
             let mut compiler = Compiler::new();
             compiler.compile(parse(test.0))?;
+            println!("testing vm for:\n{}", compiler.byte_code().instructions);
             let mut vm = VM::new(compiler.byte_code());
             vm.run()?;
 
             let stack_elem = vm.stack_top();
+            println!("vm stack: {}", vm.show_stack());
             assert_eq!(stack_elem, test.1);
         }
 
@@ -49,8 +157,89 @@ mod test {
             ("1", Object::Integer(1)),
             ("2", Object::Integer(2)),
             ("1 + 2", Object::Integer(3)),
+            ("1 - 2", Object::Integer(-1)),
+            ("1 * 2", Object::Integer(2)),
+            ("4 / 2", Object::Integer(2)),
+            ("50 / 2 * 2 + 10 - 5", Object::Integer(55)),
+            ("5 + 5 + 5 + 5 - 10", Object::Integer(10)),
+            ("2 * 2 * 2 * 2 * 2", Object::Integer(32)),
+            ("5 * 2 + 10", Object::Integer(20)),
+            ("5 + 2 * 10", Object::Integer(25)),
+            ("5 * (2 + 10)", Object::Integer(60)),
         ];
         vm_test(tests)
+    }
+
+    #[test]
+    fn compile_test() -> Result<(), Box<dyn Error>> {
+        // TODO add function to take ints and return objects (and other type)
+        let tests = &[
+            (
+                "1 + 2",
+                vec![Object::Integer(1), Object::Integer(2)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Add.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "1; 2",
+                vec![Object::Integer(1), Object::Integer(2)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "1 - 2",
+                vec![Object::Integer(1), Object::Integer(2)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Sub.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "1 * 2",
+                vec![Object::Integer(1), Object::Integer(2)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Mul.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "2 / 1",
+                vec![Object::Integer(2), Object::Integer(1)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Div.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+        ];
+
+        for test in tests {
+            let mut compiler = Compiler::new();
+            compiler.compile(parse(test.0))?;
+            let byte_code = compiler.byte_code();
+
+            assert_eq!(byte_code.constants, test.1);
+            // println!("Got bytecode:\n{}", byte_code.instructions);
+            // println!("\nCorrect bytecode:\n{}", flatten(&mut test.2.clone()));
+            assert_eq!(
+                byte_code.instructions.to_string(),
+                flatten(&mut test.2.clone()).to_string()
+            );
+        }
+        Ok(())
     }
 
     #[test]
@@ -82,35 +271,6 @@ mod test {
         for test in tests {
             assert_eq!(flatten(&mut test.0.clone()).to_string(), test.1);
         }
-    }
-
-    #[test]
-    fn compile_test() -> Result<(), Box<dyn Error>> {
-        // TODO add function to take ints and return objects (and other type)
-        let tests = &[(
-            "1 + 2",
-            vec![Object::Integer(1), Object::Integer(2)],
-            vec![
-                Instructions::vec(Op::Constant.make(&[0])),
-                Instructions::vec(Op::Constant.make(&[1])),
-                Instructions::vec(Op::Add.make(&[])),
-            ],
-        )];
-
-        for test in tests {
-            let mut compiler = Compiler::new();
-            compiler.compile(parse(test.0))?;
-            let byte_code = compiler.byte_code();
-
-            assert_eq!(byte_code.constants, test.1);
-            println!("Got bytecode:\n{}", byte_code.instructions);
-            println!("\nCorrect bytecode:\n{}", flatten(&mut test.2.clone()));
-            assert_eq!(
-                byte_code.instructions.to_string(),
-                flatten(&mut test.2.clone()).to_string()
-            );
-        }
-        Ok(())
     }
 
     #[test]

@@ -5,13 +5,17 @@ use crate::utils;
 pub enum Op {
     Constant,
     Add,
+    Pop,
+    Sub,
+    Mul,
+    Div,
 }
 
 impl Op {
     pub const fn lookup(&self) -> &[u8] {
         match self {
             Op::Constant => &[2],
-            Op::Add => &[],
+            Op::Add | Op::Pop | Op::Sub | Op::Mul | Op::Div => &[],
         }
     }
 
@@ -19,11 +23,15 @@ impl Op {
         match value {
             0 => Self::Constant,
             1 => Self::Add,
+            2 => Self::Pop,
+            3 => Self::Sub,
+            4 => Self::Mul,
+            5 => Self::Div,
             _ => panic!(),
         }
     }
 
-    pub fn make(&self, operands: &[u64]) -> Vec<u8> {
+    pub fn make(self, operands: &[u64]) -> Vec<u8> {
         let def = self.lookup();
         let mut instruction_len = 1;
         for w in def {
@@ -31,7 +39,7 @@ impl Op {
         }
 
         let mut instruction = vec![0; instruction_len.into()];
-        instruction[0] = *self as u8;
+        instruction[0] = self as u8;
 
         let mut offset = 1;
         for (i, operand) in operands.iter().enumerate() {
@@ -46,7 +54,7 @@ impl Op {
         instruction
     }
 
-    pub fn read_operands(&self, ins: &[u8]) -> (Vec<u64>, usize) {
+    pub fn read_operands(self, ins: &[u8]) -> (Vec<u64>, usize) {
         let mut operands = vec![0; self.lookup().len()];
         let mut offset = 0;
 
@@ -61,7 +69,7 @@ impl Op {
         (operands, offset)
     }
 
-    pub fn fmt_instruction(&self, operands: &[u64]) -> String {
+    pub fn fmt_instruction(self, operands: &[u64]) -> String {
         match operands.len() {
             0 => format!("Op{self:?}"),
             1 => format!("Op{self:?} {}", operands[0]),

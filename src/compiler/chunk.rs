@@ -6,10 +6,12 @@ use crate::compiler::code::Op;
 pub struct Instructions(pub Vec<u8>);
 
 impl Instructions {
-    pub fn new() -> Self {
-        Instructions(Vec::new())
+    pub const fn new() -> Self {
+        Self(Vec::new())
     }
 
+    // used in tests
+    #[allow(dead_code)]
     pub fn vec(vec: Vec<u8>) -> Self {
         Self(vec)
     }

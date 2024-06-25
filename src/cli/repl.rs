@@ -6,7 +6,7 @@ use std::{
 };
 
 use crate::{
-    compiler::{compiler::Compiler, vm::VM},
+    compiler::{vm::VM, Compiler},
     interpreter::{
         evaluator::{object::Object, Evaluator},
         lexer::Lexer,

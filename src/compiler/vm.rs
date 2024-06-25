@@ -1,6 +1,6 @@
 use crate::{compiler::code::Op, interpreter::evaluator::object::Object, utils};
 
-use super::{chunk::Instructions, compiler::ByteCode};
+use super::{chunk::Instructions, ByteCode};
 
 macro_rules! null {
     ($self: ident) => {
@@ -29,16 +29,16 @@ impl VM {
     }
 
     pub fn stack_top(&self) -> Object {
-        self.stack[self.sp - 1].clone()
+        self.stack[self.sp].clone()
     }
 
     #[allow(unreachable_patterns)]
     pub fn run(&mut self) -> Result<(), String> {
-        println!("vm run ins:{:?}", self.instructions);
+        println!("vm run ins:{:?}", self.instructions.to_string());
         let mut ip = 0;
         while ip < self.instructions.0.len() {
-            println!("loop ip={ip}");
-            let op: Op = Op::from_u8(self.instructions[ip as usize]);
+            // println!("loop ip={ip}");
+            let op: Op = Op::from_u8(self.instructions[ip]);
 
             match op {
                 Op::Constant => {
@@ -46,10 +46,22 @@ impl VM {
                     ip += 2;
                     self.push(self.constants[idx as usize].clone())?;
                 }
-                Op::Add => {
+                Op::Add | Op::Sub | Op::Mul | Op::Div => {
                     let right = self.pop();
                     let left = self.pop();
-                    self.push(left + right)?;
+                    match match op {
+                        Op::Add => left + right,
+                        Op::Sub => left - right,
+                        Op::Mul => left * right,
+                        Op::Div => left / right,
+                        _ => unreachable!(),
+                    } {
+                        Object::Error(err) => return Err(err),
+                        obj => self.push(obj)?,
+                    }
+                }
+                Op::Pop => {
+                    _ = self.pop();
                 }
                 _ => null!(self)?,
             }
@@ -75,5 +87,17 @@ impl VM {
 
             Ok(())
         }
+    }
+
+    // used in tests
+    #[allow(dead_code)]
+    pub fn show_stack(&self) -> String {
+        format!(
+            "{:?}",
+            self.stack
+                .iter()
+                .filter(|obj| **obj != Object::Uninit)
+                .collect::<Vec<&Object>>()
+        )
     }
 }
