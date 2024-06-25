@@ -11,9 +11,7 @@ impl Instructions {
     }
 
     pub fn replace(&mut self, pos: usize, new: &[u8]) {
-        for i in 0..new.len() {
-            self.0[pos+i] = new[i];
-        }
+        self.0[pos..(new.len() + pos)].copy_from_slice(new);
     }
 
     pub fn remove_last_instruction(&mut self, pos: usize) {

@@ -28,26 +28,35 @@ macro_rules! check_binary {
 }
 
 const STACK_SIZE: usize = 2048;
-const UNINT_OBJECT: Object = Object::Uninit;
+pub const UNINT_OBJECT: Object = Object::Uninit;
 const TRUE: Object = Object::Boolean(true);
 const FALSE: Object = Object::Boolean(false);
 const NULL: Object = Object::Null;
+pub const GLOBAL_SIZE: usize = 15_000;
 
+// to avoid allocation, stack of &Object, pointing to alloc handler
 pub struct VM {
     constants: Vec<Object>,
     instructions: Instructions,
     stack: Box<[Object; STACK_SIZE]>,
     sp: usize,
+    globals: Box<[Object; GLOBAL_SIZE]>,
 }
 
 impl VM {
+    #[allow(dead_code)]
     pub fn new(byte_code: ByteCode) -> Self {
         Self {
             constants: byte_code.constants,
             instructions: byte_code.instructions,
             stack: Box::new([UNINT_OBJECT; STACK_SIZE]),
             sp: 0,
+            globals: Box::new([UNINT_OBJECT; GLOBAL_SIZE])
         }
+    }
+
+    pub fn new_with_globals_store(byte_code: ByteCode, globals: Box<[Object; GLOBAL_SIZE]>) -> Self {
+        Self { constants: byte_code.constants, instructions: byte_code.instructions, stack: Box::new([UNINT_OBJECT; STACK_SIZE]), sp: 0, globals }
     }
 
     pub fn stack_top(&self) -> Object {
@@ -110,6 +119,18 @@ impl VM {
                     }
                 }
                 Op::Null => null!(self)?,
+                Op::SetGlobal => {
+                    let global_idx = utils::read_u16(&self.instructions.0[ip + 1..]);
+                    ip += 2;
+
+                    self.globals[global_idx as usize] = self.pop();
+                }
+                Op::GetGlobal => {
+                    let global_idx = utils::read_u16(&self.instructions.0[ip + 1..]);
+                    ip += 2;
+
+                    self.push(self.globals[global_idx as usize].clone())?
+                }
                 op => err!("'{op:?}' is unimplemented for vm")?,
             }
 
@@ -146,6 +167,10 @@ impl VM {
                 .filter(|obj| **obj != Object::Uninit)
                 .collect::<Vec<&Object>>()
         )
+    }
+
+    pub fn globals(self) -> Box<[Object; GLOBAL_SIZE]> {
+        self.globals
     }
 }
 
@@ -188,6 +213,15 @@ mod test {
     }
 
     #[test]
+    fn global_symbol_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("let one = 1; one", 1),
+            ("let one = 1; let two = 2; one + two", 3),
+            ("let one = 1; let two = one + one; one + two", 3),
+        ])
+    }
+
+    #[test]
     fn conditional_test() -> Result<(), Box<dyn Error>> {
         vm_test(&[
             ("if (true) { 10 }", 10),
@@ -197,13 +231,10 @@ mod test {
             ("if (1 < 2) { 10 }", 10),
             ("if (1 < 2) { 10 } else { 20 }", 10),
             ("if (1 > 2) { 10 } else { 20 }", 20),
-            ("if ((if (false) { 10 })) { 10 } else { 20 }", 20)
+            ("if ((if (false) { 10 })) { 10 } else { 20 }", 20),
         ])?;
 
-        vm_test(&[
-            ("if (false) { 10 }", NULL),
-            ("if (1 > 2) { 10 }", NULL),
-        ])
+        vm_test(&[("if (false) { 10 }", NULL), ("if (1 > 2) { 10 }", NULL)])
     }
 
     #[test]
@@ -234,7 +265,7 @@ mod test {
             ("!!true", true),
             ("!!false", false),
             ("!!5", true),
-            ("!(if (false) { 5; })", true)
+            ("!(if (false) { 5; })", true),
         ])
     }
 

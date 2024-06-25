@@ -19,12 +19,18 @@ pub enum Op {
     Jump,
     JumpNotTruthy,
     Null,
+    GetGlobal,
+    SetGlobal,
 }
 
 impl Op {
     pub const fn lookup(&self) -> &[u8] {
         match self {
-            Self::Constant | Self::Jump | Self::JumpNotTruthy => &[2],
+            Self::Constant
+            | Self::Jump
+            | Self::JumpNotTruthy
+            | Self::GetGlobal
+            | Self::SetGlobal => &[2],
             Self::Add
             | Self::Pop
             | Self::Sub
@@ -59,6 +65,8 @@ impl Op {
             13 => Self::Jump,
             14 => Self::JumpNotTruthy,
             15 => Self::Null,
+            16 => Self::GetGlobal,
+            17 => Self::SetGlobal,
             _ => panic!(),
         }
     }

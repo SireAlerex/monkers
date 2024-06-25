@@ -6,21 +6,38 @@ use std::{
 };
 
 use crate::{
-    compiler::{vm::VM, Compiler},
+    compiler::{symbol_table::SymbolTable, vm::{GLOBAL_SIZE, UNINT_OBJECT, VM}, Compiler},
     interpreter::{
-        evaluator::{object::Object, Evaluator},
-        lexer::Lexer,
-        parser::Parser,
-        token::Source,
+        ast::Program, evaluator::{object::Object, Evaluator}, lexer::Lexer, parser::Parser, token::Source
     },
 };
 
 pub fn start<R: BufRead, W: Write>(input: R, mut output: W) -> Result<(), Box<dyn Error>> {
-    let mut evaluator = Evaluator::new();
+    let mut symbol_table = SymbolTable::new();
+    let mut constants = Vec::new();
+    let mut globals = Box::new([UNINT_OBJECT; GLOBAL_SIZE]);
 
     write_flush(&mut output, b">> ");
     for line in input.lines().map_while(Result::ok) {
-        eval_str(&line, &mut evaluator, &mut output, Source::Repl)?;
+        let mut parser = Parser::new(Lexer::new(&line, Source::Repl));
+        let program = parser.parse_program();
+
+        if parser.is_err() {
+            print_parser_errors(&mut output, parser.errors());
+            return Err("can't run code because of parsing errors".to_owned().into());
+        } else {
+            let mut compiler = Compiler::new_with_state(symbol_table, constants);
+            compiler.compile(program)?;
+            let mut vm = VM::new_with_globals_store(compiler.byte_code(), globals);
+            vm.run()?;
+            if !matches!(vm.stack_top(), Object::Null) {
+                write_flush(&mut output, format!("{}\n", vm.stack_top()).as_bytes());
+            }
+
+            globals = vm.globals();
+            (symbol_table, constants) = compiler.consume();
+        }
+
         write_flush(&mut output, b">> ");
     }
     Ok(())
@@ -39,15 +56,43 @@ pub fn read<W: Write>(file_path: String, mut output: W) -> Result<(), Box<dyn Er
     BufReader::new(File::open(file_path)?).read_to_end(&mut content)?;
 
     let input = String::from_utf8(content)?;
-    let mut evaluator = Evaluator::new();
-    eval_str(&input, &mut evaluator, &mut output, source)?;
+
+    let mut parser = Parser::new(Lexer::new(&input, source));
+    let program = parser.parse_program();
+
+    if parser.is_err() {
+        print_parser_errors(&mut output, parser.errors());
+        return Err("can't run code because of parsing errors".to_owned().into());
+    } else {
+        let mut compiler = Compiler::new();
+        compiler.compile(program)?;
+        let mut vm = VM::new(compiler.byte_code());
+        vm.run()?;
+        if !matches!(vm.stack_top(), Object::Null) {
+            write_flush(&mut output, format!("{}\n", vm.stack_top()).as_bytes());
+        }
+    }
 
     Ok(())
 }
 
+fn run<W: Write>(input: &str, output: &mut W, source: Source, symbol_table: SymbolTable,
+    constants: Vec<Object>,
+    globals: Box<[Object; GLOBAL_SIZE]>) -> Result<(), Box<dyn Error>> {
+    let mut parser = Parser::new(Lexer::new(input, source));
+    let program = parser.parse_program();
+
+    if parser.is_err() {
+        print_parser_errors(output, parser.errors());
+        Err("can't run code because of parsing errors".to_owned().into())
+    } else {
+        vm(program, output, symbol_table, constants, globals)
+    }    
+}
+
 fn eval_str<W: Write>(
     input: &str,
-    _evaluator: &mut Evaluator,
+    evaluator: &mut Evaluator,
     output: &mut W,
     source: Source,
 ) -> Result<(), Box<dyn Error>> {
@@ -57,18 +102,27 @@ fn eval_str<W: Write>(
     if parser.is_err() {
         print_parser_errors(output, parser.errors());
     } else {
-        // let eval = evaluator.eval_program(program);
-        // if !matches!(eval, Object::Null) {
-        //     write_flush(output, format!("{eval}\n").as_bytes());
-        // }
-
-        let mut compiler = Compiler::new();
-        compiler.compile(program)?;
-        let mut vm = VM::new(compiler.byte_code());
-        vm.run()?;
-        if !matches!(vm.stack_top(), Object::Null) {
-            write_flush(output, format!("{}\n", vm.stack_top()).as_bytes());
+        let eval = evaluator.eval_program(program);
+        if !matches!(eval, Object::Null) {
+            write_flush(output, format!("{eval}\n").as_bytes());
         }
+    }
+    Ok(())
+}
+
+fn vm<W: Write>(
+    program: Program,
+    output: &mut W,
+    symbol_table: SymbolTable,
+    constants: Vec<Object>,
+    globals: Box<[Object; GLOBAL_SIZE]>
+) -> Result<(), Box<dyn Error>> {
+    let mut compiler = Compiler::new_with_state(symbol_table, constants);
+    compiler.compile(program)?;
+    let mut vm = VM::new_with_globals_store(compiler.byte_code(), globals);
+    vm.run()?;
+    if !matches!(vm.stack_top(), Object::Null) {
+        write_flush(output, format!("{}\n", vm.stack_top()).as_bytes());
     }
     Ok(())
 }

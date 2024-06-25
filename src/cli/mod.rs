@@ -2,6 +2,7 @@ use std::io::{self, BufReader};
 
 use clap::Parser;
 
+#[allow(dead_code)]
 pub mod repl;
 
 #[derive(Debug, Parser)]

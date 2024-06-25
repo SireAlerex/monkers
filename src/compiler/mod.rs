@@ -5,10 +5,11 @@ use crate::interpreter::{
 
 use chunk::Instructions;
 use code::Op;
+use symbol_table::SymbolTable;
 
 pub mod chunk;
 pub mod code;
-// pub mod compiler;
+pub mod symbol_table;
 pub mod vm;
 
 macro_rules! err {
@@ -22,16 +23,23 @@ pub struct Compiler {
     constants: Vec<Object>,
     last_instruction: Option<EmittedInstruction>,
     previous_instruction: Option<EmittedInstruction>,
+    symbol_table: SymbolTable,
 }
 
 impl Compiler {
+    #[allow(dead_code)]
     pub fn new() -> Self {
         Compiler {
             instructions: Instructions::new(),
             constants: Vec::new(),
             last_instruction: None,
             previous_instruction: None,
+            symbol_table: SymbolTable::new(),
         }
+    }
+
+    pub fn new_with_state(symbol_table: SymbolTable, constants: Vec<Object>) -> Self {
+        Self { instructions: Instructions::new(), constants, last_instruction: None, previous_instruction: None, symbol_table }
     }
 
     pub fn compile(&mut self, program: Program) -> Result<(), String> {
@@ -44,12 +52,17 @@ impl Compiler {
     fn compile_stmt(&mut self, stmt: Stmt) -> Result<(), String> {
         match stmt {
             Stmt::Expr(expr) => {
-                let res = self.compile_expr(expr);
+                self.compile_expr(expr)?;
                 let _ = self.emit(Op::Pop, &[]);
-                res
             }
-            _ => err!("unimplemented stmt: {stmt}"),
+            Stmt::Let(name, expr) => {
+                self.compile_expr(expr)?;
+                let symbol = self.symbol_table.define(name);
+                let _ = self.emit(Op::SetGlobal, &[symbol.index() as u64]);
+            },
+            _ => err!("unimplemented stmt: {stmt}")?,
         }
+        Ok(())
     }
 
     fn compile_expr(&mut self, expr: Expr) -> Result<(), String> {
@@ -87,7 +100,11 @@ impl Compiler {
                 Ok(())
             }
             Expr::Literal(lit) => self.compile_literal(&lit),
-            Expr::If { cond, consequence, alternative } => {
+            Expr::If {
+                cond,
+                consequence,
+                alternative,
+            } => {
                 self.compile_expr(*cond)?;
 
                 // emit JumpNotThruthy with a temp value
@@ -108,7 +125,7 @@ impl Compiler {
                     self.compile(block)?;
                     if self.last_instruction_is_pop() {
                         self.remove_last_pop();
-                    }                    
+                    }
                 } else {
                     self.emit(Op::Null, &[]);
                 }
@@ -117,6 +134,14 @@ impl Compiler {
                 self.change_operand(jump_pos, after_alternative_pos as u64);
 
                 Ok(())
+            }
+            Expr::Ident(name) => {
+                if let Some(symbol) = self.symbol_table.resolve(&name) {
+                    let _ = self.emit(Op::GetGlobal, &[symbol.index() as u64]);
+                    Ok(())
+                } else {
+                    err!("undefined variable: {name}")
+                }                
             }
             _ => err!("unimplemented expr: {expr}"),
         }
@@ -171,7 +196,7 @@ impl Compiler {
 
     fn set_last_instruction(&mut self, op: Op, pos: usize) {
         let previous = self.last_instruction;
-        let last = EmittedInstruction {op, pos};
+        let last = EmittedInstruction { op, pos };
 
         self.previous_instruction = previous;
         self.last_instruction = Some(last);
@@ -182,7 +207,8 @@ impl Compiler {
     }
 
     fn remove_last_pop(&mut self) {
-        self.instructions.remove_last_instruction(self.last_instruction.unwrap().pos);
+        self.instructions
+            .remove_last_instruction(self.last_instruction.unwrap().pos);
         self.last_instruction = self.previous_instruction;
     }
 
@@ -192,6 +218,10 @@ impl Compiler {
             instructions: self.instructions.clone(),
             constants: self.constants.clone(),
         }
+    }
+
+    pub fn consume(self) -> (SymbolTable, Vec<Object>) {
+        (self.symbol_table, self.constants)
     }
 }
 
@@ -203,7 +233,7 @@ pub struct ByteCode {
 #[derive(Debug, Clone, Copy)]
 struct EmittedInstruction {
     op: Op,
-    pos: usize
+    pos: usize,
 }
 
 #[cfg(test)]
@@ -246,7 +276,10 @@ mod test {
             }
 
             assert_eq!(byte_code.constants, test.1);
-            assert_eq!(byte_code.instructions.0.len(), flatten(&mut test.2.clone()).0.len());
+            assert_eq!(
+                byte_code.instructions.0.len(),
+                flatten(&mut test.2.clone()).0.len()
+            );
             assert_eq!(
                 byte_code.instructions.to_string(),
                 flatten(&mut test.2.clone()).to_string()
@@ -257,28 +290,78 @@ mod test {
     }
 
     #[test]
+    fn global_let_test() -> Result<(), Box<dyn Error>> {
+        compile_test(&[
+            (
+                "let one = 1; let two= 2;",
+                vec![Object::Integer(1), Object::Integer(2)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::SetGlobal.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::SetGlobal.make(&[1])),
+                ],
+            ),
+            (
+                "let one = 1; one;",
+                vec![Object::Integer(1)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::SetGlobal.make(&[0])),
+                    Instructions::vec(Op::GetGlobal.make(&[0])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "let one = 1; let two = one; two;",
+                vec![Object::Integer(1)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::SetGlobal.make(&[0])),
+                    Instructions::vec(Op::GetGlobal.make(&[0])),
+                    Instructions::vec(Op::SetGlobal.make(&[1])),
+                    Instructions::vec(Op::GetGlobal.make(&[1])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+        ])
+    }
+
+    #[test]
     fn conditional_test() -> Result<(), Box<dyn Error>> {
         compile_test(&[
-            ("if (true) { 10 }; 3333;", vec![Object::Integer(10), Object::Integer(3333)], vec![
-                Instructions::vec(Op::True.make(&[])),              // 0000
-                Instructions::vec(Op::JumpNotTruthy.make(&[10])),   // 0001
-                Instructions::vec(Op::Constant.make(&[0])),         // 0004
-                Instructions::vec(Op::Jump.make(&[11])),            // 0007
-                Instructions::vec(Op::Null.make(&[])),              // 0010
-                Instructions::vec(Op::Pop.make(&[])),               // 0011
-                Instructions::vec(Op::Constant.make(&[1])),         // 0012
-                Instructions::vec(Op::Pop.make(&[])),               // 0015
-            ]),
-            ("if (true) { 10 } else { 20 }; 3333;", vec![Object::Integer(10), Object::Integer(20), Object::Integer(3333)], vec![
-                Instructions::vec(Op::True.make(&[])),              // 0000
-                Instructions::vec(Op::JumpNotTruthy.make(&[10])),   // 0001
-                Instructions::vec(Op::Constant.make(&[0])),         // 0004
-                Instructions::vec(Op::Jump.make(&[13])),            // 0007
-                Instructions::vec(Op::Constant.make(&[1])),         // 0010
-                Instructions::vec(Op::Pop.make(&[])),               // 0013
-                Instructions::vec(Op::Constant.make(&[2])),         // 0014
-                Instructions::vec(Op::Pop.make(&[])),               // 0017
-            ])
+            (
+                "if (true) { 10 }; 3333;",
+                vec![Object::Integer(10), Object::Integer(3333)],
+                vec![
+                    Instructions::vec(Op::True.make(&[])),            // 0000
+                    Instructions::vec(Op::JumpNotTruthy.make(&[10])), // 0001
+                    Instructions::vec(Op::Constant.make(&[0])),       // 0004
+                    Instructions::vec(Op::Jump.make(&[11])),          // 0007
+                    Instructions::vec(Op::Null.make(&[])),            // 0010
+                    Instructions::vec(Op::Pop.make(&[])),             // 0011
+                    Instructions::vec(Op::Constant.make(&[1])),       // 0012
+                    Instructions::vec(Op::Pop.make(&[])),             // 0015
+                ],
+            ),
+            (
+                "if (true) { 10 } else { 20 }; 3333;",
+                vec![
+                    Object::Integer(10),
+                    Object::Integer(20),
+                    Object::Integer(3333),
+                ],
+                vec![
+                    Instructions::vec(Op::True.make(&[])),            // 0000
+                    Instructions::vec(Op::JumpNotTruthy.make(&[10])), // 0001
+                    Instructions::vec(Op::Constant.make(&[0])),       // 0004
+                    Instructions::vec(Op::Jump.make(&[13])),          // 0007
+                    Instructions::vec(Op::Constant.make(&[1])),       // 0010
+                    Instructions::vec(Op::Pop.make(&[])),             // 0013
+                    Instructions::vec(Op::Constant.make(&[2])),       // 0014
+                    Instructions::vec(Op::Pop.make(&[])),             // 0017
+                ],
+            ),
         ])
     }
 
