@@ -46,16 +46,17 @@ pub(crate) use null;
 
 #[derive(Debug, Clone, PartialEq)]
 pub enum Object {
-    Integer(i64),
-    Boolean(bool),
-    String(String),
-    Hash(HashMap<Literal, Object>),
-    Array(Vec<Object>),
-    Returned(Box<Object>),
-    Null,
-    Error(String),
-    Function(Function),
-    Builtin(BuiltinFunction),
+    Integer(i64),                   // 8
+    Boolean(bool),                  // 1
+    String(String),                 // 24
+    Hash(HashMap<Literal, Object>), // 48
+    Array(Vec<Object>),             //24
+    Returned(Box<Object>),          // 8
+    Null,                           // 0
+    Uninit,                         //0
+    Error(String),                  //24
+    Function(Function),             // 56
+    Builtin(BuiltinFunction),       // 8
 }
 
 impl Add<Self> for Object {
@@ -157,6 +158,7 @@ impl Object {
             Self::Array(_) => String::from("ARRAY"),
             Self::Returned(obj) => format!("RETURNED({})", obj.get_type()),
             Self::Null => String::from("NULL"),
+            Self::Uninit => panic!("Uninit object"),
             Self::Function { .. } => String::from("FUNCTION"),
             Self::Builtin(_) => String::from("BUILTIN_FUNCTION"),
             Self::Error(_) => String::from("ERROR"),
@@ -194,6 +196,7 @@ impl Display for Object {
                 write!(f, "[{}]", utils::join(array.iter(), ToString::to_string))
             }
             Self::Null => f.write_str("null"),
+            Self::Uninit => panic!("Uninit object"),
             Self::Returned(obj) => write!(f, "{obj}"),
             Self::Function(function) => write!(f, "{function}"),
             Self::Builtin(func) => write!(f, "builtin({func:?})"),

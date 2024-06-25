@@ -12,12 +12,10 @@ struct Args {
 pub fn start() {
     let args = Args::parse();
 
-    match args.file {
-        Some(file) => {
-            if let Err(e) = repl::read(file, io::stdout()) {
-                println!("Error: {e}");
-            }
-        }
+    if let Err(e) = match args.file {
+        Some(file) => repl::read(file, io::stdout()),
         None => repl::start(BufReader::new(io::stdin()), io::stdout()),
+    } {
+        println!("Error: {e}");
     }
 }

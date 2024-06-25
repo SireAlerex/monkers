@@ -5,21 +5,25 @@ use std::{
     path::Path,
 };
 
-use crate::interpreter::{
-    evaluator::{object::Object, Evaluator},
-    lexer::Lexer,
-    parser::Parser,
-    token::Source,
+use crate::{
+    compiler::{compiler::Compiler, vm::VM},
+    interpreter::{
+        evaluator::{object::Object, Evaluator},
+        lexer::Lexer,
+        parser::Parser,
+        token::Source,
+    },
 };
 
-pub fn start<R: BufRead, W: Write>(input: R, mut output: W) {
+pub fn start<R: BufRead, W: Write>(input: R, mut output: W) -> Result<(), Box<dyn Error>> {
     let mut evaluator = Evaluator::new();
 
     write_flush(&mut output, b">> ");
     for line in input.lines().map_while(Result::ok) {
-        eval_str(&line, &mut evaluator, &mut output, Source::Repl);
+        eval_str(&line, &mut evaluator, &mut output, Source::Repl)?;
         write_flush(&mut output, b">> ");
     }
+    Ok(())
 }
 
 pub fn read<W: Write>(file_path: String, mut output: W) -> Result<(), Box<dyn Error>> {
@@ -36,23 +40,37 @@ pub fn read<W: Write>(file_path: String, mut output: W) -> Result<(), Box<dyn Er
 
     let input = String::from_utf8(content)?;
     let mut evaluator = Evaluator::new();
-    eval_str(&input, &mut evaluator, &mut output, source);
+    eval_str(&input, &mut evaluator, &mut output, source)?;
 
     Ok(())
 }
 
-fn eval_str<W: Write>(input: &str, evaluator: &mut Evaluator, output: &mut W, source: Source) {
+fn eval_str<W: Write>(
+    input: &str,
+    _evaluator: &mut Evaluator,
+    output: &mut W,
+    source: Source,
+) -> Result<(), Box<dyn Error>> {
     let mut parser = Parser::new(Lexer::new(input, source));
     let program = parser.parse_program();
 
     if parser.is_err() {
         print_parser_errors(output, parser.errors());
     } else {
-        let eval = evaluator.eval_program(program);
-        if !matches!(eval, Object::Null) {
-            write_flush(output, format!("{eval}\n").as_bytes());
+        // let eval = evaluator.eval_program(program);
+        // if !matches!(eval, Object::Null) {
+        //     write_flush(output, format!("{eval}\n").as_bytes());
+        // }
+
+        let mut compiler = Compiler::new();
+        compiler.compile(program);
+        let mut vm = VM::new(compiler.byte_code());
+        vm.run()?;
+        if !matches!(vm.stack_top(), Object::Null) {
+            write_flush(output, format!("{}\n", vm.stack_top()).as_bytes());
         }
     }
+    Ok(())
 }
 
 fn print_parser_errors<W: Write>(output: &mut W, errors: &[String]) {

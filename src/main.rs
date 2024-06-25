@@ -1,4 +1,5 @@
 mod cli;
+mod compiler;
 mod interpreter;
 mod utils;
 
