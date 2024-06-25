@@ -50,6 +50,16 @@ impl Compiler {
 
     fn compile_expr(&mut self, expr: Expr) -> Result<(), String> {
         match expr {
+            Expr::Prefix(operator, right) => {
+                self.compile_expr(*right)?;
+                let _ = match operator {
+                    Operator::Bang => self.emit(Op::Bang, &[]),
+                    Operator::Minus => self.emit(Op::Minus, &[]),
+                    _ => return err!("unimplemented infix operator: {operator}"),
+                };
+
+                Ok(())
+            }
             Expr::Infix(left, operator, right) => {
                 if let Operator::Less = operator {
                     self.compile_expr(*right)?;
@@ -159,8 +169,8 @@ mod test {
                 println!(
                     "Testing input: '{}'\nGot bytecode:\n{}\n\nWanted bytecode:\n{}",
                     test.0,
-                    byte_code.instructions.to_string(),
-                    flatten(&mut test.2.clone()).to_string()
+                    byte_code.instructions,
+                    flatten(&mut test.2.clone())
                 );
             }
 
@@ -253,6 +263,15 @@ mod test {
                     Instructions::vec(Op::Pop.make(&[])),
                 ],
             ),
+            (
+                "!true",
+                vec![],
+                vec![
+                    Instructions::vec(Op::True.make(&[])),
+                    Instructions::vec(Op::Bang.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
         ])
     }
 
@@ -307,6 +326,15 @@ mod test {
                     Instructions::vec(Op::Constant.make(&[0])),
                     Instructions::vec(Op::Constant.make(&[1])),
                     Instructions::vec(Op::Div.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "-1",
+                vec![Object::Integer(1)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Minus.make(&[])),
                     Instructions::vec(Op::Pop.make(&[])),
                 ],
             ),

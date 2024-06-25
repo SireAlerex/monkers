@@ -14,6 +14,8 @@ pub enum Op {
     Equal,
     NotEqual,
     GreaterThan,
+    Minus,
+    Bang,
 }
 
 impl Op {
@@ -29,7 +31,9 @@ impl Op {
             | Self::False
             | Self::Equal
             | Self::NotEqual
-            | Self::GreaterThan => &[],
+            | Self::GreaterThan
+            | Self::Minus
+            | Self::Bang => &[],
         }
     }
 
@@ -46,6 +50,8 @@ impl Op {
             8 => Self::Equal,
             9 => Self::NotEqual,
             10 => Self::GreaterThan,
+            11 => Self::Minus,
+            12 => Self::Bang,
             _ => panic!(),
         }
     }

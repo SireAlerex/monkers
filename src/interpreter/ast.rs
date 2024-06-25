@@ -9,10 +9,10 @@ use super::parser::Parser;
 
 pub type Program = Block;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]
 pub struct Block(pub Vec<Stmt>);
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]
 pub enum Stmt {
     Return(Expr),
     Let(Ident, Expr),
@@ -21,7 +21,7 @@ pub enum Stmt {
 
 pub type Ident = String;
 
-#[derive(Debug, Clone, PartialEq, PartialOrd)]
+#[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]
 pub enum Expr {
     Ident(Ident),
     Literal(Literal),

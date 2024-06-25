@@ -527,7 +527,8 @@ impl<'a, 'b> Parser<'a> {
         !self.errors.is_empty()
     }
 
-    // util
+    // used in tests
+    #[allow(dead_code)]
     pub fn parse(input: &str) -> Program {
         Parser::new(Lexer::new(input, Source::Repl)).parse_program()
     }

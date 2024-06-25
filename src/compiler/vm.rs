@@ -10,6 +10,12 @@ macro_rules! null {
     };
 }
 
+macro_rules! err {
+    ($($arg:tt)*) => {
+        Err(format!("VM error: {}", format!($($arg)*)))
+    };
+}
+
 macro_rules! check_binary {
     ($self: ident, $func: ident) => {{
         let right = $self.pop();
@@ -49,7 +55,7 @@ impl VM {
 
     #[allow(unreachable_patterns)]
     pub fn run(&mut self) -> Result<(), String> {
-        println!("vm run ins:{:?}", self.instructions.to_string());
+        // println!("vm run ins:{:?}", self.instructions.to_string());
         let mut ip = 0;
         while ip < self.instructions.0.len() {
             // println!("loop ip={ip}");
@@ -81,6 +87,15 @@ impl VM {
                     self.push(Object::Boolean(left != right))?;
                 }
                 Op::GreaterThan => check_binary!(self, greater),
+                Op::Bang => match self.pop() {
+                    TRUE => self.push(FALSE)?,
+                    FALSE => self.push(TRUE)?,
+                    _ => self.push(FALSE)?,
+                },
+                Op::Minus => match self.pop() {
+                    Object::Integer(a) => self.push(Object::Integer(-a))?,
+                    obj => return err!("unsupported type for negation: {}", obj.get_type()),
+                },
                 _ => null!(self)?,
             }
 
@@ -136,12 +151,20 @@ mod test {
         for test in tests {
             let mut compiler = Compiler::new();
             compiler.compile(Parser::parse(test.0))?;
-            println!("testing vm for:\n{}", compiler.byte_code().instructions);
+
             let mut vm = VM::new(compiler.byte_code());
             vm.run()?;
-
             let stack_elem = vm.stack_top();
-            println!("vm stack: {}", vm.show_stack());
+
+            if stack_elem != test.1.clone().into() {
+                println!(
+                    "Testing vm for input: '{}'\nBytecode:\n{}",
+                    test.0,
+                    compiler.byte_code().instructions
+                );
+                println!("vm stack: {}", vm.show_stack());
+            }
+
             assert_eq!(stack_elem, test.1.clone().into());
         }
 
@@ -170,6 +193,12 @@ mod test {
             ("(1 < 2) == false", false),
             ("(1 > 2) == true", false),
             ("(1 > 2) == false", true),
+            ("!true", false),
+            ("!false", true),
+            ("!5", false),
+            ("!!true", true),
+            ("!!false", false),
+            ("!!5", true),
         ])
     }
 
@@ -188,6 +217,10 @@ mod test {
             ("5 * 2 + 10", 20),
             ("5 + 2 * 10", 25),
             ("5 * (2 + 10)", 60),
+            ("-5", -5),
+            ("-10", -10),
+            ("-50 + 100 + -50", 0),
+            ("(5 + 10 * 2 + 15 / 3) * 2 + -10", 50),
         ])
     }
 }

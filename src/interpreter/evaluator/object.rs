@@ -44,7 +44,7 @@ macro_rules! int_op {
 pub(crate) use error;
 pub(crate) use null;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Object {
     Integer(i64),                   // 8
     Boolean(bool),                  // 1
@@ -222,7 +222,7 @@ impl From<String> for Object {
     }
 }
 
-#[derive(Clone, PartialEq)]
+#[derive(Clone, PartialEq, Eq)]
 pub struct Function {
     pub parameters: Vec<Ident>,
     pub body: Block,
