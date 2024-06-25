@@ -1,3 +1,5 @@
+use std::ops::{Add, Div, Mul, Sub};
+
 use crate::{compiler::code::Op, interpreter::evaluator::object::Object, utils};
 
 use super::{chunk::Instructions, ByteCode};
@@ -6,6 +8,17 @@ macro_rules! null {
     ($self: ident) => {
         $self.push(Object::Null)
     };
+}
+
+macro_rules! check_binary {
+    ($self: ident, $func: ident) => {{
+        let right = $self.pop();
+        let left = $self.pop();
+        match left.$func(right) {
+            Object::Error(err) => return Err(err),
+            obj => $self.push(obj)?,
+        }
+    }};
 }
 
 const STACK_SIZE: usize = 2048;
@@ -48,25 +61,26 @@ impl VM {
                     ip += 2;
                     self.push(self.constants[idx as usize].clone())?;
                 }
-                Op::Add | Op::Sub | Op::Mul | Op::Div => {
-                    let right = self.pop();
-                    let left = self.pop();
-                    match match op {
-                        Op::Add => left + right,
-                        Op::Sub => left - right,
-                        Op::Mul => left * right,
-                        Op::Div => left / right,
-                        _ => unreachable!(),
-                    } {
-                        Object::Error(err) => return Err(err),
-                        obj => self.push(obj)?,
-                    }
-                }
+                Op::Add => check_binary!(self, add),
+                Op::Sub => check_binary!(self, sub),
+                Op::Mul => check_binary!(self, mul),
+                Op::Div => check_binary!(self, div),
                 Op::Pop => {
                     _ = self.pop();
                 }
                 Op::True => self.push(TRUE)?,
                 Op::False => self.push(FALSE)?,
+                Op::Equal => {
+                    let right = self.pop();
+                    let left = self.pop();
+                    self.push(Object::Boolean(left == right))?;
+                }
+                Op::NotEqual => {
+                    let right = self.pop();
+                    let left = self.pop();
+                    self.push(Object::Boolean(left != right))?;
+                }
+                Op::GreaterThan => check_binary!(self, greater),
                 _ => null!(self)?,
             }
 
@@ -110,12 +124,15 @@ impl VM {
 mod test {
     use std::error::Error;
 
-    use crate::{compiler::{vm::VM, Compiler}, interpreter::{evaluator::object::Object, parser::Parser}};
+    use crate::{
+        compiler::{vm::VM, Compiler},
+        interpreter::{evaluator::object::Object, parser::Parser},
+    };
 
     fn vm_test<T>(tests: &[(&str, T)]) -> Result<(), Box<dyn Error>>
     where
-    T: Into<Object> + Sized + Clone
-     {
+        T: Into<Object> + Sized + Clone,
+    {
         for test in tests {
             let mut compiler = Compiler::new();
             compiler.compile(Parser::parse(test.0))?;
@@ -136,6 +153,23 @@ mod test {
         vm_test(&[
             ("true", true),
             ("false", false),
+            ("1 < 2", true),
+            ("1 > 2", false),
+            ("1 < 1", false),
+            ("1 > 1", false),
+            ("1 == 1", true),
+            ("1 != 1", false),
+            ("1 == 2", false),
+            ("1 != 2", true),
+            ("true == true", true),
+            ("false == false", true),
+            ("true == false", false),
+            ("true != false", true),
+            ("false != true", true),
+            ("(1 < 2) == true", true),
+            ("(1 < 2) == false", false),
+            ("(1 > 2) == true", false),
+            ("(1 > 2) == false", true),
         ])
     }
 

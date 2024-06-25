@@ -51,14 +51,23 @@ impl Compiler {
     fn compile_expr(&mut self, expr: Expr) -> Result<(), String> {
         match expr {
             Expr::Infix(left, operator, right) => {
+                if let Operator::Less = operator {
+                    self.compile_expr(*right)?;
+                    self.compile_expr(*left)?;
+                    let _ = self.emit(Op::GreaterThan, &[]);
+                    return Ok(());
+                }
+
                 self.compile_expr(*left)?;
                 self.compile_expr(*right)?;
-
                 let _ = match operator {
                     Operator::Plus => self.emit(Op::Add, &[]),
                     Operator::Minus => self.emit(Op::Sub, &[]),
                     Operator::Asterisk => self.emit(Op::Mul, &[]),
                     Operator::Slash => self.emit(Op::Div, &[]),
+                    Operator::Equal => self.emit(Op::Equal, &[]),
+                    Operator::NotEqual => self.emit(Op::NotEqual, &[]),
+                    Operator::Greater => self.emit(Op::GreaterThan, &[]),
                     _ => return err!("unimplemented infix operator: {operator}"),
                 };
                 Ok(())
@@ -124,9 +133,7 @@ mod test {
 
     use crate::{
         compiler::Compiler,
-        interpreter::{
-            evaluator::object::Object, parser::Parser,
-        },
+        interpreter::{evaluator::object::Object, parser::Parser},
     };
 
     use super::{chunk::Instructions, code::Op};
@@ -140,11 +147,22 @@ mod test {
         Instructions::vec(res)
     }
 
-    fn compile_test(tests: &[(&str, Vec<Object>, Vec<Instructions>)]) -> Result<(), Box<dyn Error>>  {
+    fn compile_test(
+        tests: &[(&str, Vec<Object>, Vec<Instructions>)],
+    ) -> Result<(), Box<dyn Error>> {
         for test in tests {
             let mut compiler = Compiler::new();
             compiler.compile(Parser::parse(test.0))?;
             let byte_code = compiler.byte_code();
+
+            if byte_code.instructions.to_string() != flatten(&mut test.2.clone()).to_string() {
+                println!(
+                    "Testing input: '{}'\nGot bytecode:\n{}\n\nWanted bytecode:\n{}",
+                    test.0,
+                    byte_code.instructions.to_string(),
+                    flatten(&mut test.2.clone()).to_string()
+                );
+            }
 
             assert_eq!(byte_code.constants, test.1);
             assert_eq!(
@@ -159,10 +177,82 @@ mod test {
     #[test]
     fn boolean_test() -> Result<(), Box<dyn Error>> {
         compile_test(&[
-            ("true", vec![], vec![Instructions::vec(Op::True.make(&[])),
-            Instructions::vec(Op::Pop.make(&[])),]),
-            ("false", vec![], vec![Instructions::vec(Op::False.make(&[])),
-            Instructions::vec(Op::Pop.make(&[])),])
+            (
+                "true",
+                vec![],
+                vec![
+                    Instructions::vec(Op::True.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "false",
+                vec![],
+                vec![
+                    Instructions::vec(Op::False.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "1 > 2",
+                vec![Object::Integer(1), Object::Integer(2)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::GreaterThan.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "1 < 2",
+                vec![Object::Integer(2), Object::Integer(1)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::GreaterThan.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "1 == 2",
+                vec![Object::Integer(1), Object::Integer(2)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Equal.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "1 != 2",
+                vec![Object::Integer(1), Object::Integer(2)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::NotEqual.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "true == false",
+                vec![],
+                vec![
+                    Instructions::vec(Op::True.make(&[])),
+                    Instructions::vec(Op::False.make(&[])),
+                    Instructions::vec(Op::Equal.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "true != false",
+                vec![],
+                vec![
+                    Instructions::vec(Op::True.make(&[])),
+                    Instructions::vec(Op::False.make(&[])),
+                    Instructions::vec(Op::NotEqual.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
         ])
     }
 
