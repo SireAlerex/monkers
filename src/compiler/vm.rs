@@ -1,6 +1,13 @@
-use std::ops::{Add, Div, Mul, Sub};
+use std::{
+    collections::HashMap,
+    ops::{Add, Div, Mul, Sub},
+};
 
-use crate::{compiler::code::Op, interpreter::evaluator::object::Object, utils};
+use crate::{
+    compiler::code::Op,
+    interpreter::{ast::Literal, evaluator::object::Object},
+    utils,
+};
 
 use super::{chunk::Instructions, ByteCode};
 
@@ -21,6 +28,17 @@ macro_rules! check_binary {
         let right = $self.pop();
         let left = $self.pop();
         match left.$func(right) {
+            Object::Error(err) => return Err(err),
+            obj => $self.push(obj)?,
+        }
+    }};
+}
+
+macro_rules! check_binary_ref {
+    ($self: ident, $func: ident) => {{
+        let right = $self.pop();
+        let left = $self.pop();
+        match left.$func(&right) {
             Object::Error(err) => return Err(err),
             obj => $self.push(obj)?,
         }
@@ -80,8 +98,7 @@ impl VM {
 
             match op {
                 Op::Constant => {
-                    let idx = utils::read_u16(&self.instructions.0[ip + 1..]);
-                    ip += 2;
+                    let idx = self.next_two_bytes(&mut ip);
                     self.push(self.constants[idx as usize].clone())?;
                 }
                 Op::Add => check_binary!(self, add),
@@ -117,8 +134,7 @@ impl VM {
                     ip = pos as usize - 1;
                 }
                 Op::JumpNotTruthy => {
-                    let pos = utils::read_u16(&self.instructions.0[ip + 1..]);
-                    ip += 2;
+                    let pos = self.next_two_bytes(&mut ip);
 
                     let cond = self.pop();
                     if !cond.is_truthy() {
@@ -127,16 +143,30 @@ impl VM {
                 }
                 Op::Null => null!(self)?,
                 Op::SetGlobal => {
-                    let global_idx = utils::read_u16(&self.instructions.0[ip + 1..]);
-                    ip += 2;
+                    let global_idx = self.next_two_bytes(&mut ip);
 
                     self.globals[global_idx as usize] = self.pop();
                 }
                 Op::GetGlobal => {
-                    let global_idx = utils::read_u16(&self.instructions.0[ip + 1..]);
-                    ip += 2;
+                    let global_idx = self.next_two_bytes(&mut ip);
 
                     self.push(self.globals[global_idx as usize].clone())?;
+                }
+                Op::Array => {
+                    let elem_count = self.next_two_bytes(&mut ip);
+
+                    let array = self.build_array(self.sp - elem_count as usize, self.sp);
+                    self.sp -= elem_count as usize;
+                    self.push(array)?;
+                }
+                Op::Hash => {
+                    let elem_count = self.next_two_bytes(&mut ip);
+
+                    let hash = self.build_hash(self.sp - elem_count as usize, self.sp)?;
+                    self.push(hash)?;
+                }
+                Op::Index => {
+                    check_binary_ref!(self, get_unchecked_key);
                 }
                 op => err!("'{op:?}' is unimplemented for vm")?,
             }
@@ -145,6 +175,39 @@ impl VM {
         }
 
         Ok(())
+    }
+
+    fn build_hash(&mut self, start: usize, end: usize) -> Result<Object, String> {
+        let mut hash: HashMap<Literal, Object> = HashMap::new();
+
+        for i in (start..end).step_by(2) {
+            let mut key = UNINT_OBJECT;
+            core::mem::swap(&mut key, &mut self.stack[i]);
+            let key = Literal::try_from(key)?;
+
+            let mut value = UNINT_OBJECT;
+            core::mem::swap(&mut value, &mut self.stack[i + 1]);
+
+            hash.insert(key, value);
+        }
+
+        Ok(Object::Hash(hash))
+    }
+
+    fn build_array(&mut self, start: usize, end: usize) -> Object {
+        let mut elements: Vec<Object> = vec![UNINT_OBJECT; end - start];
+
+        for i in start..end {
+            core::mem::swap(&mut elements[i - start], &mut self.stack[i]);
+        }
+
+        Object::Array(elements)
+    }
+
+    fn next_two_bytes(&mut self, ip: &mut usize) -> u16 {
+        let global_idx = utils::read_u16(&self.instructions.0[*ip + 1..]);
+        *ip += 2;
+        global_idx
     }
 
     fn pop(&mut self) -> Object {
@@ -183,11 +246,11 @@ impl VM {
 
 #[cfg(test)]
 mod test {
-    use std::error::Error;
+    use std::{collections::HashMap, error::Error};
 
     use crate::{
         compiler::{vm::VM, Compiler},
-        interpreter::{evaluator::object::Object, parser::Parser},
+        interpreter::{ast::Literal, evaluator::object::Object, parser::Parser},
     };
 
     use super::NULL;
@@ -217,6 +280,50 @@ mod test {
         }
 
         Ok(())
+    }
+
+    fn hash<L: Into<Literal>, T: Into<Object>>(pairs: Vec<(L, T)>) -> Object {
+        let mut hash: HashMap<Literal, Object> = HashMap::new();
+        for (k, v) in pairs {
+            hash.insert(k.into(), v.into());
+        }
+        Object::Hash(hash)
+    }
+
+    #[test]
+    fn index_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("[1, 2, 3][1]", 2),
+            ("[1, 2, 3][0 + 2]", 3),
+            ("[[1, 1, 1]][0][0]", 1),
+            ("{1: 1, 2: 2}[1]", 1),
+            ("{1: 1, 2: 2}[2]", 2),
+        ])?;
+        vm_test(&[
+            ("[][0]", Object::Null),
+            ("[1, 2, 3][99]", Object::Null),
+            ("[1][-1]", Object::Null),
+            ("{1: 1}[0]", Object::Null),
+            ("{}[0]", Object::Null),
+        ])
+    }
+
+    #[test]
+    fn hash_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("{}", hash::<i64, i64>(vec![])),
+            ("{1: 2, 2: 3}", hash(vec![(1, 2), (2, 3)])),
+            ("{1 + 1: 2 * 2, 3 + 3: 4 * 4}", hash(vec![(2, 4), (6, 16)])),
+        ])
+    }
+
+    #[test]
+    fn array_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("[]", vec![]),
+            ("[1, 2, 3]", vec![1, 2, 3]),
+            ("[1 + 2, 3 * 4, 5 + 6]", vec![3, 12, 11]),
+        ])
     }
 
     #[test]

@@ -143,8 +143,29 @@ impl Compiler {
                     return err!("undefined variable: {name}");
                 }
             }
+            Expr::Array(vec) => {
+                let size = vec.len();
+                for expr in vec {
+                    self.compile_expr(expr)?;
+                }
+                let _ = self.emit(Op::Array, &[size as u64]);
+            }
+            Expr::HashLiteral(hash) => {
+                let size = hash.len() * 2;
+                for (key, value) in hash {
+                    self.compile_expr(key)?;
+                    self.compile_expr(value)?;
+                }
+                let _ = self.emit(Op::Hash, &[size as u64]);
+            }
+            Expr::Index(left, index) => {
+                self.compile_expr(*left)?;
+                self.compile_expr(*index)?;
+                let _ = self.emit(Op::Index, &[]);
+            }
             _ => return err!("unimplemented expr: {expr}"),
         }
+
         Ok(())
     }
 
@@ -213,7 +234,6 @@ impl Compiler {
     }
 
     pub fn byte_code(&self) -> ByteCode {
-        // TODO keep clone ?
         ByteCode {
             instructions: self.instructions.clone(),
             constants: self.constants.clone(),
@@ -287,6 +307,159 @@ mod test {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn index_test() -> Result<(), Box<dyn Error>> {
+        compile_test(&[
+            (
+                "[1, 2, 3][1 + 1]",
+                vec![
+                    Object::Integer(1),
+                    Object::Integer(2),
+                    Object::Integer(3),
+                    Object::Integer(1),
+                    Object::Integer(1),
+                ],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Constant.make(&[2])),
+                    Instructions::vec(Op::Array.make(&[3])),
+                    Instructions::vec(Op::Constant.make(&[3])),
+                    Instructions::vec(Op::Constant.make(&[4])),
+                    Instructions::vec(Op::Add.make(&[])),
+                    Instructions::vec(Op::Index.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "{1: 2}[2 - 1]",
+                vec![
+                    Object::Integer(1),
+                    Object::Integer(2),
+                    Object::Integer(2),
+                    Object::Integer(1),
+                ],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Hash.make(&[2])),
+                    Instructions::vec(Op::Constant.make(&[2])),
+                    Instructions::vec(Op::Constant.make(&[3])),
+                    Instructions::vec(Op::Sub.make(&[])),
+                    Instructions::vec(Op::Index.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+        ])
+    }
+
+    #[test]
+    fn hash_test() -> Result<(), Box<dyn Error>> {
+        compile_test(&[
+            (
+                "{}",
+                vec![],
+                vec![
+                    Instructions::vec(Op::Hash.make(&[0])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "{1: 2, 3: 4, 5: 6}",
+                vec![
+                    Object::Integer(1),
+                    Object::Integer(2),
+                    Object::Integer(3),
+                    Object::Integer(4),
+                    Object::Integer(5),
+                    Object::Integer(6),
+                ],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Constant.make(&[2])),
+                    Instructions::vec(Op::Constant.make(&[3])),
+                    Instructions::vec(Op::Constant.make(&[4])),
+                    Instructions::vec(Op::Constant.make(&[5])),
+                    Instructions::vec(Op::Hash.make(&[6])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "{1: 2 + 3, 4: 5 * 6}",
+                vec![
+                    Object::Integer(1),
+                    Object::Integer(2),
+                    Object::Integer(3),
+                    Object::Integer(4),
+                    Object::Integer(5),
+                    Object::Integer(6),
+                ],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Constant.make(&[2])),
+                    Instructions::vec(Op::Add.make(&[])),
+                    Instructions::vec(Op::Constant.make(&[3])),
+                    Instructions::vec(Op::Constant.make(&[4])),
+                    Instructions::vec(Op::Constant.make(&[5])),
+                    Instructions::vec(Op::Mul.make(&[])),
+                    Instructions::vec(Op::Hash.make(&[4])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+        ])
+    }
+
+    #[test]
+    fn array_test() -> Result<(), Box<dyn Error>> {
+        compile_test(&[
+            (
+                "[]",
+                vec![],
+                vec![
+                    Instructions::vec(Op::Array.make(&[0])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "[1, 2, 3]",
+                vec![Object::Integer(1), Object::Integer(2), Object::Integer(3)],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Constant.make(&[2])),
+                    Instructions::vec(Op::Array.make(&[3])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "[1 + 2, 3 - 4, 5 * 6]",
+                vec![
+                    Object::Integer(1),
+                    Object::Integer(2),
+                    Object::Integer(3),
+                    Object::Integer(4),
+                    Object::Integer(5),
+                    Object::Integer(6),
+                ],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Add.make(&[])),
+                    Instructions::vec(Op::Constant.make(&[2])),
+                    Instructions::vec(Op::Constant.make(&[3])),
+                    Instructions::vec(Op::Sub.make(&[])),
+                    Instructions::vec(Op::Constant.make(&[4])),
+                    Instructions::vec(Op::Constant.make(&[5])),
+                    Instructions::vec(Op::Mul.make(&[])),
+                    Instructions::vec(Op::Array.make(&[3])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+        ])
     }
 
     #[test]

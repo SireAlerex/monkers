@@ -21,6 +21,9 @@ pub enum Op {
     Null,
     GetGlobal,
     SetGlobal,
+    Array,
+    Hash,
+    Index,
 }
 
 impl Op {
@@ -30,7 +33,9 @@ impl Op {
             | Self::Jump
             | Self::JumpNotTruthy
             | Self::GetGlobal
-            | Self::SetGlobal => &[2],
+            | Self::SetGlobal
+            | Self::Array
+            | Self::Hash => &[2],
             Self::Add
             | Self::Pop
             | Self::Sub
@@ -43,7 +48,8 @@ impl Op {
             | Self::GreaterThan
             | Self::Minus
             | Self::Bang
-            | Self::Null => &[],
+            | Self::Null
+            | Self::Index => &[],
         }
     }
 
@@ -67,6 +73,9 @@ impl Op {
             15 => Self::Null,
             16 => Self::GetGlobal,
             17 => Self::SetGlobal,
+            18 => Self::Array,
+            19 => Self::Hash,
+            20 => Self::Index,
             _ => panic!(),
         }
     }

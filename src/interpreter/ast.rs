@@ -5,7 +5,7 @@ use std::{
 
 use crate::utils;
 
-use super::parser::Parser;
+use super::{evaluator::object::Object, parser::Parser};
 
 pub type Program = Block;
 
@@ -50,6 +50,56 @@ pub enum Literal {
     Int(i64),
     Boolean(bool),
     String(String),
+}
+
+impl From<i64> for Literal {
+    fn from(value: i64) -> Self {
+        Self::Int(value)
+    }
+}
+
+impl From<bool> for Literal {
+    fn from(value: bool) -> Self {
+        Self::Boolean(value)
+    }
+}
+
+impl From<String> for Literal {
+    fn from(value: String) -> Self {
+        Self::String(value)
+    }
+}
+
+impl From<&str> for Literal {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_owned())
+    }
+}
+
+impl TryFrom<Object> for Literal {
+    type Error = String;
+
+    fn try_from(value: Object) -> Result<Self, Self::Error> {
+        match value {
+            Object::Integer(x) => Ok(Self::Int(x)),
+            Object::Boolean(b) => Ok(Self::Boolean(b)),
+            Object::String(s) => Ok(Self::String(s)),
+            obj => Err(format!("unusable as a hash key: {}", obj.get_type())),
+        }
+    }
+}
+
+impl TryFrom<&Object> for Literal {
+    type Error = String;
+
+    fn try_from(value: &Object) -> Result<Self, Self::Error> {
+        match value {
+            Object::Integer(x) => Ok(Self::Int(*x)),
+            Object::Boolean(b) => Ok(Self::Boolean(*b)),
+            Object::String(s) => Ok(Self::String(s.clone())),
+            obj => Err(format!("unusable as a hash key: {}", obj.get_type())),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq)]

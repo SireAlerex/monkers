@@ -75,7 +75,6 @@ impl<'a> Lexer<'a> {
             Some((_, ':')) => token!(data, Kind::Colon),
             Some((_, '"')) => {
                 if let Some(s) = self.read_string() {
-                    println!("read string: '{s}'");
                     token!(data, Kind::String(s))
                 } else {
                     return Err("missing '\"' to end string".to_owned());

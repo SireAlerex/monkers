@@ -83,24 +83,34 @@ impl Object {
     pub fn get(&self, index: &Self) -> Self {
         match (self, index) {
             (Self::Array(array), Self::Integer(i)) => {
-                if *i < 0 {
+                if *i < 0 || *i >= array.len() as i64 {
                     return null!();
                 }
-                match TryInto::<usize>::try_into(*i) {
-                    Ok(idx) => {
-                        if idx >= array.len() {
-                            return null!();
-                        }
-
-                        array[idx].clone()
-                    }
-                    Err(err) => error!("size can't be a 64bit integer ({err})"),
-                }
+                array[*i as usize].clone()
             }
             (Self::Hash(hash), _) => index.literal().map_or_else(
                 || error!("unusable as hash key: {}", index.get_type()),
                 |key| hash.get(&key).map_or_else(|| null!(), Clone::clone),
             ),
+            (_, _) => error!(
+                "index operation not supported: {}[{}]",
+                self.get_type(),
+                index.get_type()
+            ),
+        }
+    }
+
+    pub fn get_unchecked_key(&self, index: &Self) -> Self {
+        match (self, index) {
+            (Self::Array(array), Self::Integer(i)) => {
+                if *i < 0 || *i >= array.len() as i64 {
+                    return null!();
+                }
+                array[*i as usize].clone()
+            }
+            (Self::Hash(hash), _) => hash
+                .get(&Literal::try_from(index).unwrap())
+                .map_or_else(|| null!(), Clone::clone),
             (_, _) => error!(
                 "index operation not supported: {}[{}]",
                 self.get_type(),
@@ -225,6 +235,12 @@ impl From<String> for Object {
 impl From<&str> for Object {
     fn from(value: &str) -> Self {
         Self::String(value.to_owned())
+    }
+}
+
+impl<T: Into<Self>> From<Vec<T>> for Object {
+    fn from(value: Vec<T>) -> Self {
+        Self::Array(value.into_iter().map(|elem| elem.into()).collect())
     }
 }
 
