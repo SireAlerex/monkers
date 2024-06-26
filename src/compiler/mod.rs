@@ -29,7 +29,7 @@ pub struct Compiler {
 impl Compiler {
     #[allow(dead_code)]
     pub fn new() -> Self {
-        Compiler {
+        Self {
             instructions: Instructions::new(),
             constants: Vec::new(),
             last_instruction: None,
@@ -39,7 +39,13 @@ impl Compiler {
     }
 
     pub fn new_with_state(symbol_table: SymbolTable, constants: Vec<Object>) -> Self {
-        Self { instructions: Instructions::new(), constants, last_instruction: None, previous_instruction: None, symbol_table }
+        Self {
+            instructions: Instructions::new(),
+            constants,
+            last_instruction: None,
+            previous_instruction: None,
+            symbol_table,
+        }
     }
 
     pub fn compile(&mut self, program: Program) -> Result<(), String> {
@@ -59,7 +65,7 @@ impl Compiler {
                 self.compile_expr(expr)?;
                 let symbol = self.symbol_table.define(name);
                 let _ = self.emit(Op::SetGlobal, &[symbol.index() as u64]);
-            },
+            }
             _ => err!("unimplemented stmt: {stmt}")?,
         }
         Ok(())
@@ -74,11 +80,9 @@ impl Compiler {
                     Operator::Minus => self.emit(Op::Minus, &[]),
                     _ => return err!("unimplemented infix operator: {operator}"),
                 };
-
-                Ok(())
             }
             Expr::Infix(left, operator, right) => {
-                if let Operator::Less = operator {
+                if operator == Operator::Less {
                     self.compile_expr(*right)?;
                     self.compile_expr(*left)?;
                     let _ = self.emit(Op::GreaterThan, &[]);
@@ -97,7 +101,6 @@ impl Compiler {
                     Operator::Greater => self.emit(Op::GreaterThan, &[]),
                     _ => return err!("unimplemented infix operator: {operator}"),
                 };
-                Ok(())
             }
             Expr::Literal(lit) => self.compile_literal(&lit),
             Expr::If {
@@ -132,28 +135,24 @@ impl Compiler {
 
                 let after_alternative_pos = self.instructions.0.len();
                 self.change_operand(jump_pos, after_alternative_pos as u64);
-
-                Ok(())
             }
             Expr::Ident(name) => {
                 if let Some(symbol) = self.symbol_table.resolve(&name) {
                     let _ = self.emit(Op::GetGlobal, &[symbol.index() as u64]);
-                    Ok(())
                 } else {
-                    err!("undefined variable: {name}")
-                }                
+                    return err!("undefined variable: {name}");
+                }
             }
-            _ => err!("unimplemented expr: {expr}"),
+            _ => return err!("unimplemented expr: {expr}"),
         }
+        Ok(())
     }
 
-    fn compile_literal(&mut self, lit: &Literal) -> Result<(), String> {
+    fn compile_literal(&mut self, lit: &Literal) {
         match lit {
             Literal::Int(x) => {
-                let integer = Object::Integer(*x);
-                let index = self.add_constant(integer);
+                let index = self.add_constant(Object::Integer(*x));
                 let _ = self.emit(Op::Constant, &[index as u64]);
-                Ok(())
             }
             Literal::Boolean(bool) => {
                 let _ = if *bool {
@@ -161,10 +160,11 @@ impl Compiler {
                 } else {
                     self.emit(Op::False, &[])
                 };
-
-                Ok(())
             }
-            _ => err!("unimplemented literal: {lit}"),
+            Literal::String(s) => {
+                let index = self.add_constant(Object::String(s.to_owned()));
+                let _ = self.emit(Op::Constant, &[index as u64]);
+            }
         }
     }
 
@@ -287,6 +287,33 @@ mod test {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn string_test() -> Result<(), Box<dyn Error>> {
+        compile_test(&[
+            (
+                "\"monkey\"",
+                vec![Object::String("monkey".to_owned())],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+            (
+                "\"mon\" + \"key\"",
+                vec![
+                    Object::String("mon".to_owned()),
+                    Object::String("key".to_owned()),
+                ],
+                vec![
+                    Instructions::vec(Op::Constant.make(&[0])),
+                    Instructions::vec(Op::Constant.make(&[1])),
+                    Instructions::vec(Op::Add.make(&[])),
+                    Instructions::vec(Op::Pop.make(&[])),
+                ],
+            ),
+        ])
     }
 
     #[test]

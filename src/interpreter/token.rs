@@ -18,15 +18,6 @@ impl Token {
         }
     }
 
-    pub fn illegal() -> Self {
-        Self {
-            kind: Kind::Illegal,
-            line: 0,
-            column: 0,
-            source: Rc::new(Source::Repl),
-        }
-    }
-
     pub fn ident(&self) -> Option<String> {
         match &self.kind {
             Kind::Identifier(s) => Some(s.clone()),
@@ -44,7 +35,6 @@ pub enum Source {
 #[allow(clippy::upper_case_acronyms)]
 #[derive(Debug, Clone, PartialEq, PartialOrd, Eq, Hash)]
 pub enum Kind {
-    Illegal,
     EOF,
     Identifier(String),
     Int(i64),

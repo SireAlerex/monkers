@@ -64,7 +64,7 @@ fn parse_prefix(parser: &mut Parser) -> Option<Expr> {
             .error_from_current(&format!("bad prefix operator: {:?}", parser.cur_token.kind))?,
     };
 
-    parser.next_token();
+    parser.next_token()?;
 
     if let Some(right) = parser.parse_expression(Precedence::Prefix) {
         Some(Expr::Prefix(op, Box::new(right)))
@@ -88,7 +88,7 @@ fn parse_infix(parser: &mut Parser, left: Expr) -> Option<Expr> {
     };
 
     let precedence = parser.cur_precedence();
-    parser.next_token();
+    parser.next_token()?;
 
     if let Some(right) = parser.parse_expression(precedence) {
         Some(Expr::Infix(Box::new(left), op, Box::new(right)))
@@ -105,7 +105,7 @@ fn parse_boolean(parser: &mut Parser) -> Option<Expr> {
 }
 
 fn parse_paren(parser: &mut Parser) -> Option<Expr> {
-    parser.next_token();
+    parser.next_token()?;
 
     if let Some(expr) = parser.parse_expression(Precedence::Lowest) {
         parser.check_peek(&Kind::RParen)?;
@@ -117,7 +117,7 @@ fn parse_paren(parser: &mut Parser) -> Option<Expr> {
 }
 
 fn parse_if(parser: &mut Parser) -> Option<Expr> {
-    parser.next_token();
+    parser.next_token()?;
     let cond = if let Some(cond) = parser.parse_expression(Precedence::Lowest) {
         Box::new(cond)
     } else {
@@ -129,7 +129,7 @@ fn parse_if(parser: &mut Parser) -> Option<Expr> {
     let consequence = parser.parse_block();
 
     let alternative = if parser.peek_token_is(&Kind::Key(Keyword::Else)) {
-        parser.next_token();
+        parser.next_token()?;
         parser.check_peek(&Kind::LBrace)?;
 
         Some(parser.parse_block())
@@ -179,7 +179,7 @@ fn parse_array(parser: &mut Parser) -> Option<Expr> {
 }
 
 fn parse_index(parser: &mut Parser, left: Expr) -> Option<Expr> {
-    parser.next_token();
+    parser.next_token()?;
     if let Some(index) = parser.parse_expression(Precedence::Lowest) {
         parser.check_peek(&Kind::RBracket)?;
 
@@ -193,7 +193,7 @@ fn parse_hash(parser: &mut Parser) -> Option<Expr> {
     let mut pairs = Vec::new();
 
     while !parser.peek_token_is(&Kind::RBrace) {
-        parser.next_token();
+        parser.next_token()?;
         let key = match parser.parse_expression(Precedence::Lowest) {
             Some(expr) => expr,
             None => parser.error_from_current("hashmap error: can't parse key")?,
@@ -201,7 +201,7 @@ fn parse_hash(parser: &mut Parser) -> Option<Expr> {
 
         parser.check_peek(&Kind::Colon)?;
 
-        parser.next_token();
+        parser.next_token()?;
         let value = match parser.parse_expression(Precedence::Lowest) {
             Some(expr) => expr,
             None => parser.error_from_current("hashmap error: can't parse value")?,
@@ -221,72 +221,76 @@ fn parse_hash(parser: &mut Parser) -> Option<Expr> {
 
 // TODO: function to return None and add an error
 impl<'a, 'b> Parser<'a> {
-    pub fn new(lexer: Lexer<'a>) -> Self {
-        let mut parser = Parser {
-            lexer,
-            cur_token: Token::illegal(),
-            peek_token: Token::illegal(),
-            errors: Vec::new(),
-            prefix_fns: HashMap::new(),
-            infix_fns: HashMap::new(),
-        };
+    pub fn new(mut lexer: Lexer<'a>) -> Self {
+        let mut prefix_fns: HashMap<Kind, PrefixParseFn> = HashMap::new();
+        let mut infix_fns: HashMap<Kind, InfixParseFn> = HashMap::new();
 
         // Prefix functions
-        parser
-            .prefix_fns
-            .insert(Kind::Identifier("_".to_owned()), parse_ident);
-        parser
-            .prefix_fns
-            .insert(Kind::String("_".to_owned()), parse_string);
-        parser.prefix_fns.insert(Kind::Int(0), parse_int_literal);
-        parser
-            .prefix_fns
-            .insert(Kind::Key(Keyword::True), parse_boolean);
-        parser
-            .prefix_fns
-            .insert(Kind::Key(Keyword::False), parse_boolean);
-        parser.prefix_fns.insert(Kind::Key(Keyword::If), parse_if);
-        parser
-            .prefix_fns
-            .insert(Kind::Key(Keyword::Function), parse_fn);
-        parser.prefix_fns.insert(Kind::Bang, parse_prefix);
-        parser.prefix_fns.insert(Kind::Minus, parse_prefix);
-        parser.prefix_fns.insert(Kind::LParen, parse_paren);
-        parser.prefix_fns.insert(Kind::LBracket, parse_array);
-        parser.prefix_fns.insert(Kind::LBrace, parse_hash);
+        prefix_fns.insert(Kind::Identifier("_".to_owned()), parse_ident);
+        prefix_fns.insert(Kind::String("_".to_owned()), parse_string);
+        prefix_fns.insert(Kind::Int(0), parse_int_literal);
+        prefix_fns.insert(Kind::Key(Keyword::True), parse_boolean);
+        prefix_fns.insert(Kind::Key(Keyword::False), parse_boolean);
+        prefix_fns.insert(Kind::Key(Keyword::If), parse_if);
+        prefix_fns.insert(Kind::Key(Keyword::Function), parse_fn);
+        prefix_fns.insert(Kind::Bang, parse_prefix);
+        prefix_fns.insert(Kind::Minus, parse_prefix);
+        prefix_fns.insert(Kind::LParen, parse_paren);
+        prefix_fns.insert(Kind::LBracket, parse_array);
+        prefix_fns.insert(Kind::LBrace, parse_hash);
 
         // Infix functions
-        parser.infix_fns.insert(Kind::Plus, parse_infix);
-        parser.infix_fns.insert(Kind::Minus, parse_infix);
-        parser.infix_fns.insert(Kind::Asterisk, parse_infix);
-        parser.infix_fns.insert(Kind::Slash, parse_infix);
-        parser.infix_fns.insert(Kind::GT, parse_infix);
-        parser.infix_fns.insert(Kind::LT, parse_infix);
-        parser.infix_fns.insert(Kind::EQ, parse_infix);
-        parser.infix_fns.insert(Kind::NotEQ, parse_infix);
-        parser.infix_fns.insert(Kind::LParen, parse_call);
-        parser.infix_fns.insert(Kind::LBracket, parse_index);
+        infix_fns.insert(Kind::Plus, parse_infix);
+        infix_fns.insert(Kind::Minus, parse_infix);
+        infix_fns.insert(Kind::Asterisk, parse_infix);
+        infix_fns.insert(Kind::Slash, parse_infix);
+        infix_fns.insert(Kind::GT, parse_infix);
+        infix_fns.insert(Kind::LT, parse_infix);
+        infix_fns.insert(Kind::EQ, parse_infix);
+        infix_fns.insert(Kind::NotEQ, parse_infix);
+        infix_fns.insert(Kind::LParen, parse_call);
+        infix_fns.insert(Kind::LBracket, parse_index);
 
-        parser.next_token();
-        parser.next_token();
+        let cur_token = lexer
+            .next_token()
+            .inspect_err(|err| panic!("error getting first token: {err}"))
+            .unwrap();
+        let peek_token = lexer
+            .next_token()
+            .inspect_err(|err| panic!("error getting second token: {err}"))
+            .unwrap();
 
-        parser
+        Parser {
+            lexer,
+            cur_token,
+            peek_token,
+            errors: Vec::new(),
+            prefix_fns,
+            infix_fns,
+        }
     }
 
-    fn next_token(&mut self) {
+    #[must_use]
+    fn next_token(&mut self) -> Option<()> {
         // TODO: remove clone (change Token ? use iter over tokens ?)
         self.cur_token = self.peek_token.clone();
-        self.peek_token = self.lexer.next_token();
+        match self.lexer.next_token() {
+            Ok(tok) => self.peek_token = tok,
+            Err(err) => self.error_from_current::<()>(&err)?,
+        }
+        Some(())
     }
 
     pub fn parse_program(&mut self) -> Program {
         let mut program = Block(Vec::new());
 
-        while self.cur_token.kind != Kind::EOF {
+        while self.cur_token.kind != Kind::EOF && !self.is_err() {
             if let Some(stmt) = self.parse_stmt() {
                 program.0.push(stmt);
             }
-            self.next_token();
+            if self.next_token().is_none() {
+                break;
+            }
         }
 
         program
@@ -304,7 +308,7 @@ impl<'a, 'b> Parser<'a> {
         let expr = self.parse_expression(Precedence::Lowest)?;
 
         if self.peek_token_is(&Kind::Semicolon) {
-            self.next_token();
+            self.next_token()?;
         }
 
         Some(Stmt::Expr(expr))
@@ -318,7 +322,7 @@ impl<'a, 'b> Parser<'a> {
                 // TODO: get rid of clone
                 let map = self.infix_fns.clone();
                 if let Some(infix) = Self::get_fn(&map, &self.peek_token.kind) {
-                    self.next_token();
+                    self.next_token()?;
                     left = infix(self, left)?;
                 } else {
                     return Some(left);
@@ -335,16 +339,20 @@ impl<'a, 'b> Parser<'a> {
     }
 
     fn parse_block(&mut self) -> Block {
-        self.next_token();
-
         let mut stmts = Vec::new();
+        if self.next_token().is_none() {
+            return Block(stmts);
+        }
+
         while !self.cur_token_is(&Kind::RBrace) && !self.cur_token_is(&Kind::EOF) {
             if let Some(stmt) = self.parse_stmt() {
                 stmts.push(stmt);
             } else {
                 _ = self.error_from_current::<()>("block error: can't parse statement");
             }
-            self.next_token();
+            if self.next_token().is_none() {
+                break;
+            }
         }
 
         Block(stmts)
@@ -352,7 +360,7 @@ impl<'a, 'b> Parser<'a> {
 
     fn parse_let_stmt(&mut self) -> Option<Stmt> {
         if let Kind::Identifier(_) = &self.peek_token.kind {
-            self.next_token();
+            self.next_token()?;
         } else {
             return self.error_from_token::<Stmt>(
                 &format!(
@@ -365,24 +373,24 @@ impl<'a, 'b> Parser<'a> {
 
         let name: Ident = Token::ident(&self.cur_token)?;
 
-        self.check_peek(&Kind::Assign)?;
-        self.next_token();
+        self.check_peek(&Kind::Assign)?; // <--
+        self.next_token()?;
 
         let value = self.parse_expression(Precedence::Lowest)?;
 
         if self.peek_token_is(&Kind::Semicolon) {
-            self.next_token();
+            self.next_token()?;
         }
 
         Some(Stmt::Let(name, value))
     }
 
     fn parse_return_stmt(&mut self) -> Option<Stmt> {
-        self.next_token();
+        self.next_token()?;
 
         let ret = self.parse_expression(Precedence::Lowest)?;
         if self.peek_token_is(&Kind::Semicolon) {
-            self.next_token();
+            self.next_token()?;
         }
 
         Some(Stmt::Return(ret))
@@ -396,18 +404,18 @@ impl<'a, 'b> Parser<'a> {
         let mut list = Vec::new();
 
         if self.peek_token_is(end) {
-            self.next_token();
+            self.next_token()?;
             return Some(list);
         }
 
-        self.next_token();
+        self.next_token()?;
         if let Some(expr) = self.parse_expression(Precedence::Lowest) {
             list.push(expr);
         }
 
         while self.peek_token_is(&Kind::Comma) {
-            self.next_token();
-            self.next_token();
+            self.next_token()?;
+            self.next_token()?;
 
             if let Some(expr) = self.parse_expression(Precedence::Lowest) {
                 list.push(expr);
@@ -423,18 +431,18 @@ impl<'a, 'b> Parser<'a> {
         let mut parameters = Vec::new();
 
         if self.peek_token_is(&Kind::RParen) {
-            self.next_token();
+            self.next_token()?;
             return Some(parameters);
         }
 
-        self.next_token();
+        self.next_token()?;
         if let Kind::Identifier(ident) = &self.cur_token.kind {
             parameters.push(ident.clone());
         }
 
         while self.peek_token_is(&Kind::Comma) {
-            self.next_token();
-            self.next_token();
+            self.next_token()?;
+            self.next_token()?;
 
             if let Kind::Identifier(ident) = &self.cur_token.kind {
                 parameters.push(ident.clone());
@@ -478,7 +486,7 @@ impl<'a, 'b> Parser<'a> {
 
     fn check_peek(&mut self, kind: &Kind) -> Option<()> {
         if self.peek_token_is(kind) {
-            self.next_token();
+            self.next_token()?;
             Some(())
         } else {
             self.peek_error(kind)
@@ -1052,5 +1060,19 @@ mod test {
         for (res, expected) in program.0.iter().zip(tests) {
             assert_eq!(*res, expected);
         }
+    }
+
+    #[test]
+    fn string_error() {
+        let lexer = Lexer::new("let a = \"a", Source::Repl);
+        let mut parser = Parser::new(lexer);
+        let program = parser.parse_program();
+
+        assert!(parser.is_err());
+        assert!(parser
+            .errors()
+            .iter()
+            .any(|s| s.ends_with("missing '\"' to end string")));
+        assert_eq!(program, Block(Vec::new()));
     }
 }

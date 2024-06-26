@@ -37,7 +37,7 @@ impl<'a> Lexer<'a> {
         self.ch = self.chars.next();
     }
 
-    pub fn next_token(&mut self) -> Token {
+    pub fn next_token(&mut self) -> Result<Token, String> {
         self.skip_white_space();
         let data = (self.line, self.column, self.source.clone());
 
@@ -75,44 +75,45 @@ impl<'a> Lexer<'a> {
             Some((_, ':')) => token!(data, Kind::Colon),
             Some((_, '"')) => {
                 if let Some(s) = self.read_string() {
+                    println!("read string: '{s}'");
                     token!(data, Kind::String(s))
                 } else {
-                    token!(data, Kind::Illegal)
+                    return Err("missing '\"' to end string".to_owned());
                 }
             }
             Some((_, s)) => {
-                if s.is_ascii_digit() {
-                    if let Some(int) = self.read_number() {
-                        return token!(data, Kind::Int(int));
+                return {
+                    if s.is_ascii_digit() {
+                        if let Some(int) = self.read_number() {
+                            Ok(token!(data, Kind::Int(int)))
+                        } else {
+                            Err("illegal token from read_number".to_owned())
+                        }
+                    } else if Self::is_letter(s) {
+                        if let Some(ss) = self.read_ident() {
+                            Ok(match ss {
+                                "fn" => token!(data, Kind::Key(Keyword::Function)),
+                                "let" => token!(data, Kind::Key(Keyword::Let)),
+                                "true" => token!(data, Kind::Key(Keyword::True)),
+                                "false" => token!(data, Kind::Key(Keyword::False)),
+                                "if" => token!(data, Kind::Key(Keyword::If)),
+                                "else" => token!(data, Kind::Key(Keyword::Else)),
+                                "return" => token!(data, Kind::Key(Keyword::Return)),
+                                _ => token!(data, Kind::Identifier(String::from(ss))),
+                            })
+                        } else {
+                            Err("illegal token from read_ident".to_owned())
+                        }
+                    } else {
+                        Err("illegal token from char".to_owned())
                     }
-                    println!("illegal token from read_number");
-                    token!(data, Kind::Illegal)
-                } else if Self::is_letter(s) {
-                    if let Some(ss) = self.read_ident() {
-                        let t = match ss {
-                            "fn" => token!(data, Kind::Key(Keyword::Function)),
-                            "let" => token!(data, Kind::Key(Keyword::Let)),
-                            "true" => token!(data, Kind::Key(Keyword::True)),
-                            "false" => token!(data, Kind::Key(Keyword::False)),
-                            "if" => token!(data, Kind::Key(Keyword::If)),
-                            "else" => token!(data, Kind::Key(Keyword::Else)),
-                            "return" => token!(data, Kind::Key(Keyword::Return)),
-                            _ => token!(data, Kind::Identifier(String::from(ss))),
-                        };
-                        return t;
-                    }
-                    println!("illegal token from read_ident");
-                    token!(data, Kind::Illegal)
-                } else {
-                    println!("illegal token from char");
-                    token!(data, Kind::Illegal)
-                }
+                };
             }
             None => token!(data, Kind::EOF),
         };
 
         self.read_char();
-        tok
+        Ok(tok)
     }
 
     fn peek_char(&mut self) -> Option<char> {
@@ -162,8 +163,19 @@ impl<'a> Lexer<'a> {
     fn read_string(&mut self) -> Option<String> {
         self.read_char();
 
-        self.read(|c| c != '"')
-            .map(|s| s.to_owned().replace("\\t", "\t").replace("\\n", "\n"))
+        let res = self
+            .read(|c| c != '"')
+            .map(|s| s.to_owned().replace("\\t", "\t").replace("\\n", "\n"));
+
+        if let Some(ch) = self.ch {
+            if ch.1 != '"' {
+                return None;
+            }
+        } else {
+            return None;
+        }
+
+        res
     }
 
     fn skip_white_space(&mut self) {
@@ -194,7 +206,7 @@ mod test {
     use super::Lexer;
 
     #[test]
-    fn test_next_token() {
+    fn test_next_token() -> Result<(), String> {
         let input = "let five = 5;
         let ten = 10;
         
@@ -315,7 +327,8 @@ mod test {
 
         for i in 0..expected_tokens.len() {
             let tok = l.next_token();
-            assert_eq!(&tok.kind, expected_tokens.get(i).unwrap());
+            assert_eq!(&tok?.kind, expected_tokens.get(i).unwrap());
         }
+        Ok(())
     }
 }

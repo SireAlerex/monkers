@@ -206,19 +206,25 @@ impl Display for Object {
 
 impl From<i64> for Object {
     fn from(value: i64) -> Self {
-        Object::Integer(value)
+        Self::Integer(value)
     }
 }
 
 impl From<bool> for Object {
     fn from(value: bool) -> Self {
-        Object::Boolean(value)
+        Self::Boolean(value)
     }
 }
 
 impl From<String> for Object {
     fn from(value: String) -> Self {
-        Object::String(value)
+        Self::String(value)
+    }
+}
+
+impl From<&str> for Object {
+    fn from(value: &str) -> Self {
+        Self::String(value.to_owned())
     }
 }
 

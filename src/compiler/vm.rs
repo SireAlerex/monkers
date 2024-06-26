@@ -32,7 +32,7 @@ pub const UNINT_OBJECT: Object = Object::Uninit;
 const TRUE: Object = Object::Boolean(true);
 const FALSE: Object = Object::Boolean(false);
 const NULL: Object = Object::Null;
-pub const GLOBAL_SIZE: usize = 15_000;
+pub const GLOBAL_SIZE: usize = 65536;
 
 // to avoid allocation, stack of &Object, pointing to alloc handler
 pub struct VM {
@@ -40,7 +40,8 @@ pub struct VM {
     instructions: Instructions,
     stack: Box<[Object; STACK_SIZE]>,
     sp: usize,
-    globals: Box<[Object; GLOBAL_SIZE]>,
+    // heap allocated
+    globals: Box<[Object]>,
 }
 
 impl VM {
@@ -51,12 +52,18 @@ impl VM {
             instructions: byte_code.instructions,
             stack: Box::new([UNINT_OBJECT; STACK_SIZE]),
             sp: 0,
-            globals: Box::new([UNINT_OBJECT; GLOBAL_SIZE])
+            globals: vec![UNINT_OBJECT; GLOBAL_SIZE].into_boxed_slice(),
         }
     }
 
-    pub fn new_with_globals_store(byte_code: ByteCode, globals: Box<[Object; GLOBAL_SIZE]>) -> Self {
-        Self { constants: byte_code.constants, instructions: byte_code.instructions, stack: Box::new([UNINT_OBJECT; STACK_SIZE]), sp: 0, globals }
+    pub fn new_with_globals_store(byte_code: ByteCode, globals: Box<[Object]>) -> Self {
+        Self {
+            constants: byte_code.constants,
+            instructions: byte_code.instructions,
+            stack: Box::new([UNINT_OBJECT; STACK_SIZE]),
+            sp: 0,
+            globals,
+        }
     }
 
     pub fn stack_top(&self) -> Object {
@@ -129,7 +136,7 @@ impl VM {
                     let global_idx = utils::read_u16(&self.instructions.0[ip + 1..]);
                     ip += 2;
 
-                    self.push(self.globals[global_idx as usize].clone())?
+                    self.push(self.globals[global_idx as usize].clone())?;
                 }
                 op => err!("'{op:?}' is unimplemented for vm")?,
             }
@@ -169,7 +176,7 @@ impl VM {
         )
     }
 
-    pub fn globals(self) -> Box<[Object; GLOBAL_SIZE]> {
+    pub fn globals(self) -> Box<[Object]> {
         self.globals
     }
 }
@@ -210,6 +217,15 @@ mod test {
         }
 
         Ok(())
+    }
+
+    #[test]
+    fn string_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("\"monkey\"", "monkey"),
+            ("\"mon\" + \"key\"", "monkey"),
+            ("\"mon\" + \"key\" + \"banana\"", "monkeybanana"),
+        ])
     }
 
     #[test]

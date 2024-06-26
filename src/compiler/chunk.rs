@@ -2,7 +2,7 @@ use std::{fmt::Display, ops::Index};
 
 use crate::compiler::code::Op;
 
-#[derive(Debug, Clone, PartialEq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Instructions(pub Vec<u8>);
 
 impl Instructions {
