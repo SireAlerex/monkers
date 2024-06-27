@@ -57,11 +57,16 @@ const MAX_FRAMES: usize = 1024;
 pub struct Frame {
     func: Instructions,
     ip: usize,
+    base_pointer: usize,
 }
 
 impl Frame {
-    pub const fn from_instructions(func: Instructions) -> Self {
-        Self { func, ip: 0 }
+    pub const fn new(func: Instructions, base_pointer: usize) -> Self {
+        Self {
+            func,
+            ip: 0,
+            base_pointer,
+        }
     }
 }
 
@@ -70,11 +75,12 @@ impl Default for Frame {
         Self {
             func: Instructions::new(),
             ip: Default::default(),
+            base_pointer: Default::default(),
         }
     }
 }
 
-// to avoid allocation, stack of &Object, pointing to alloc handler
+// to avoid allocation, stack of &Object, pointing to alloc handler ?
 #[derive(Debug, Clone)]
 pub struct VM {
     constants: Vec<Object>,
@@ -90,7 +96,7 @@ impl VM {
     #[allow(dead_code)]
     pub fn new(byte_code: ByteCode) -> Self {
         let mut frames = vec![Frame::default(); MAX_FRAMES];
-        let main_frame = Frame::from_instructions(byte_code.instructions);
+        let main_frame = Frame::new(byte_code.instructions, 0);
         frames[0] = main_frame;
 
         Self {
@@ -105,7 +111,7 @@ impl VM {
 
     pub fn new_with_globals_store(byte_code: ByteCode, globals: Box<[Object]>) -> Self {
         let mut frames = vec![Frame::default(); MAX_FRAMES];
-        let main_frame = Frame::from_instructions(byte_code.instructions);
+        let main_frame = Frame::new(byte_code.instructions, 0);
         frames[0] = main_frame;
 
         Self {
@@ -124,11 +130,12 @@ impl VM {
 
     #[allow(unreachable_patterns)]
     pub fn run(&mut self) -> Result<(), String> {
-        // println!("vm run ins:{:?}", self.instructions.to_string());
         while self.current_frame().ip < self.current_frame().func.0.len() {
+            // let pretty_stack = self.show_stack();
             let ip = self.current_frame().ip;
             let ins = &mut self.current_frame().func;
             let op: Op = Op::from_u8(ins[ip]);
+            // println!("stack: {pretty_stack}\nvm run ip={} op:{:?} operands:{:?}", ip, op, op.read_operands(&ins.0[ip+1..]));
 
             match op {
                 Op::Constant => {
@@ -204,9 +211,17 @@ impl VM {
                     check_binary_ref!(self, get_unchecked_key);
                 }
                 Op::Call => {
-                    match self.stack[self.sp - 1].clone() {
-                        Object::CompiledFunction(func) => {
-                            self.push_frame(Frame::from_instructions(func));
+                    let args_count = self.next_byte();
+
+                    match self.stack[self.sp - 1 - args_count as usize].clone() {
+                        Object::CompiledFunction(func, locals_count, params_count) => {
+                            if args_count as usize != params_count {
+                                return err!("wrong number of arguments: want={params_count}, got={args_count}");
+                            }
+
+                            let frame = Frame::new(func, self.sp - args_count as usize);
+                            self.sp = frame.base_pointer + locals_count;
+                            self.push_frame(frame);
                         }
                         obj => panic!("calling non-function type: {}", obj.get_type()),
                     }
@@ -215,17 +230,31 @@ impl VM {
                 Op::ReturnValue => {
                     let value = self.pop();
 
-                    self.pop_frame();
-                    self.pop();
+                    let frame = self.pop_frame();
+                    self.sp = frame.base_pointer - 1;
 
                     self.push(value)?;
                 }
                 Op::Return => {
-                    // TODO: implement and add test
-                    self.pop_frame();
-                    self.pop();
+                    let frame = self.pop_frame();
+                    self.sp = frame.base_pointer - 1;
 
                     self.push(NULL)?;
+                }
+                Op::GetLocal => {
+                    let local_index = self.next_byte();
+
+                    let frame = self.current_frame();
+                    let idx = frame.base_pointer + local_index as usize;
+                    let obj = self.stack[idx].clone();
+                    self.push(obj)?;
+                }
+                Op::SetLocal => {
+                    let local_index = self.next_byte();
+
+                    let obj = self.pop();
+                    let frame = self.current_frame();
+                    self.stack[frame.base_pointer + local_index as usize] = obj;
                 }
                 op => err!("'{op:?}' is unimplemented for vm")?,
             }
@@ -260,6 +289,12 @@ impl VM {
         }
 
         Object::Array(elements)
+    }
+
+    fn next_byte(&mut self) -> u8 {
+        self.current_frame().ip += 1;
+        let ip = self.current_frame().ip;
+        self.current_frame().func[ip]
     }
 
     fn next_two_bytes(&mut self) -> u16 {
@@ -301,14 +336,16 @@ impl VM {
         self.frames[self.frame_index].clone()
     }
 
-    // used in tests
+    // debug function
     #[allow(dead_code)]
     pub fn show_stack(&self) -> String {
         format!(
             "{:?}",
             self.stack
                 .iter()
-                .filter(|obj| **obj != Object::Uninit)
+                .enumerate()
+                .filter(|(idx, obj)| **obj != Object::Uninit && *idx < self.sp)
+                .map(|(_, obj)| obj)
                 .collect::<Vec<&Object>>()
         )
     }
@@ -335,14 +372,23 @@ mod test {
     {
         for test in tests {
             let mut compiler = Compiler::new();
-            compiler.compile(Parser::parse(test.0))?;
+            compiler.compile(Parser::parse(test.0)?)?;
             println!(
                 "Testing input: '{}'\nBytecode:\n{}\n({:?})",
                 test.0,
                 compiler.byte_code().instructions,
                 compiler.byte_code().instructions
             );
-            println!("Constants:\n{:?}", compiler.byte_code().constants);
+            println!(
+                "Constants:\n[{}]",
+                compiler
+                    .byte_code()
+                    .constants
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<String>>()
+                    .join(", ")
+            );
             let mut vm = VM::new(compiler.byte_code());
             vm.run()?;
             let stack_elem = vm.stack_top();
@@ -371,9 +417,63 @@ mod test {
     }
 
     #[test]
+    fn call_with_wrong_args() -> Result<(), Box<dyn Error>> {
+        let tests = &[
+            (
+                "fn() { 1; }(1);",
+                "VM error: wrong number of arguments: want=0, got=1",
+            ),
+            (
+                "fn(a) { a; }();",
+                "VM error: wrong number of arguments: want=1, got=0",
+            ),
+            (
+                "fn(a, b) { a + b; }(1);",
+                "VM error: wrong number of arguments: want=2, got=1",
+            ),
+        ];
+
+        for test in tests {
+            let program = Parser::parse(test.0)?;
+            let mut compiler = Compiler::new();
+            compiler.compile(program)?;
+
+            let mut vm = VM::new(compiler.byte_code());
+            let res = vm.run();
+            assert!(res.is_err());
+            assert_eq!(res.err().unwrap(), test.1);
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn function_with_args_and_bindings() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("let identity = fn(a) { a; }; identity(4);", 4),
+            ("let sum = fn(a, b) { a + b; }; sum(1, 2);", 3),
+            ("let sum = fn(a, b) { let c = a + b; c; }; sum(1, 2);", 3),
+            ("let sum = fn(a, b) { let c = a + b; c; }; sum(1, 2) + sum(3, 4);", 10),
+            ("let sum = fn(a, b) { let c = a + b; c; }; let outer = fn() { sum(1, 2) + sum(3, 4); }; outer();", 10),
+            ("let globalNum = 10; let sum = fn(a, b) { let c = a + b; c + globalNum; }; let outer = fn() { sum(1, 2) + sum(3, 4) + globalNum; }; outer() + globalNum;", 50),
+        ])
+    }
+
+    #[test]
+    fn function_with_bindings() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("let one = fn() { let one = 1; one }; one();", 1),
+            ("let oneAndTwo = fn() { let one = 1; let two = 2; one + two }; oneAndTwo();", 3),
+            ("let oneAndTwo = fn() { let one = 1; let two = 2; one + two }; let threeAndFour = fn() { let three = 3; let four = 4; three + four }; oneAndTwo() + threeAndFour();", 10),
+            ("let firstFoobar = fn() { let foobar = 50; foobar; }; let secondFoobar = fn() { let foobar = 100; foobar; }; firstFoobar() + secondFoobar();", 150),
+            ("let globalSeed = 50; let minusOne = fn() { let num = 1; globalSeed - num; } let minusTwo = fn() { let num = 2; globalSeed - num; } minusOne() + minusTwo();", 97),
+        ])
+    }
+
+    #[test]
     fn first_class_function_test() -> Result<(), Box<dyn Error>> {
         vm_test(&[
             ("let returnsOne = fn() { 1; }; let returnsOneReturner = fn() { returnsOne; }; returnsOneReturner()();", 1),
+            ("let returnsOneReturner = fn() { let returnsOne = fn() { 1; }; returnsOne; }; returnsOneReturner()();", 1),
         ])
     }
 

@@ -47,18 +47,18 @@ pub(crate) use null;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Object {
-    Integer(i64),                   // 8
-    Boolean(bool),                  // 1
-    String(String),                 // 24
-    Hash(HashMap<Literal, Object>), // 48
-    Array(Vec<Object>),             //24
-    Returned(Box<Object>),          // 8
-    Null,                           // 0
-    Uninit,                         //0
-    Error(String),                  //24
-    Function(Function),             // 56
-    CompiledFunction(Instructions),
-    Builtin(BuiltinFunction), // 8
+    Integer(i64),                                 //  8
+    Boolean(bool),                                //  1
+    String(String),                               // 24
+    Hash(HashMap<Literal, Object>),               // 48
+    Array(Vec<Object>),                           // 24
+    Returned(Box<Object>),                        //  8
+    Null,                                         //  0
+    Uninit,                                       //  0
+    Error(String),                                // 24
+    Function(Function),                           // 56
+    CompiledFunction(Instructions, usize, usize), // 24
+    Builtin(BuiltinFunction),                     //  8
 }
 
 impl Add<Self> for Object {
@@ -212,7 +212,10 @@ impl Display for Object {
             Self::Uninit => panic!("Uninit object"),
             Self::Returned(obj) => write!(f, "{obj}"),
             Self::Function(function) => write!(f, "{function}"),
-            Self::CompiledFunction(ins) => write!(f, "compiled_function: {ins}"),
+            Self::CompiledFunction(ins, locals, params) => write!(
+                f,
+                "compiled_function: (ins={ins}, locals={locals}, params={params}"
+            ),
             Self::Builtin(func) => write!(f, "builtin({func:?})"),
         }
     }

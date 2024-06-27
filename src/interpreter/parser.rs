@@ -537,8 +537,15 @@ impl<'a, 'b> Parser<'a> {
 
     // used in tests
     #[allow(dead_code)]
-    pub fn parse(input: &str) -> Program {
-        Parser::new(Lexer::new(input, Source::Repl)).parse_program()
+    pub fn parse(input: &str) -> Result<Program, String> {
+        let mut parser = Parser::new(Lexer::new(input, Source::Repl));
+        let program = parser.parse_program();
+
+        if parser.is_err() {
+            Err(format!("parser is errored: {:?}", parser.errors()))
+        } else {
+            Ok(program)
+        }
     }
 }
 

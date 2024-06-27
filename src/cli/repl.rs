@@ -1,8 +1,10 @@
 use std::{
+    cell::RefCell,
     error::Error,
     fs::File,
     io::{BufRead, BufReader, Read, Write},
     path::Path,
+    rc::Rc,
 };
 
 use crate::{
@@ -12,7 +14,6 @@ use crate::{
         Compiler,
     },
     interpreter::{
-        ast::Program,
         evaluator::{object::Object, Evaluator},
         lexer::Lexer,
         parser::Parser,
@@ -20,13 +21,17 @@ use crate::{
     },
 };
 
+#[allow(unused_variables, unused_mut)]
 pub fn start<R: BufRead, W: Write>(input: R, mut output: W) -> Result<(), Box<dyn Error>> {
-    let mut symbol_table = SymbolTable::new();
-    let mut constants = Vec::new();
+    let mut evaluator = Evaluator::new();
+    let mut symbol_table = Rc::new(RefCell::new(SymbolTable::new()));
+    let mut constants: Vec<Object> = Vec::new();
     let mut globals = (vec![UNINT_OBJECT; GLOBAL_SIZE]).into_boxed_slice();
 
     write_flush(&mut output, b">> ");
     for line in input.lines().map_while(Result::ok) {
+        // eval_str(&line, &mut evaluator, &mut output, Source::Repl);
+
         let mut parser = Parser::new(Lexer::new(&line, Source::Repl));
         let program = parser.parse_program();
 
@@ -35,7 +40,7 @@ pub fn start<R: BufRead, W: Write>(input: R, mut output: W) -> Result<(), Box<dy
             return Err("can't run code because of parsing errors".to_owned().into());
         }
 
-        let mut compiler = Compiler::new_with_state(symbol_table, constants);
+        let mut compiler = Compiler::new_with_state(&symbol_table, constants);
         compiler.compile(program)?;
         let mut vm = VM::new_with_globals_store(compiler.byte_code(), globals);
         vm.run()?;
@@ -84,24 +89,24 @@ pub fn read<W: Write>(file_path: String, mut output: W) -> Result<(), Box<dyn Er
     Ok(())
 }
 
-fn run<W: Write>(
-    input: &str,
-    output: &mut W,
-    source: Source,
-    symbol_table: SymbolTable,
-    constants: Vec<Object>,
-    globals: Box<[Object; GLOBAL_SIZE]>,
-) -> Result<(), Box<dyn Error>> {
-    let mut parser = Parser::new(Lexer::new(input, source));
-    let program = parser.parse_program();
+// fn run<W: Write>(
+//     input: &str,
+//     output: &mut W,
+//     source: Source,
+//     symbol_table: SymbolTable,
+//     constants: Vec<Object>,
+//     globals: Box<[Object; GLOBAL_SIZE]>,
+// ) -> Result<(), Box<dyn Error>> {
+//     let mut parser = Parser::new(Lexer::new(input, source));
+//     let program = parser.parse_program();
 
-    if parser.is_err() {
-        print_parser_errors(output, parser.errors());
-        Err("can't run code because of parsing errors".to_owned().into())
-    } else {
-        vm(program, output, symbol_table, constants, globals)
-    }
-}
+//     if parser.is_err() {
+//         print_parser_errors(output, parser.errors());
+//         Err("can't run code because of parsing errors".to_owned().into())
+//     } else {
+//         vm(program, output, symbol_table, constants, globals)
+//     }
+// }
 
 fn eval_str<W: Write>(input: &str, evaluator: &mut Evaluator, output: &mut W, source: Source) {
     let mut parser = Parser::new(Lexer::new(input, source));
@@ -117,22 +122,22 @@ fn eval_str<W: Write>(input: &str, evaluator: &mut Evaluator, output: &mut W, so
     }
 }
 
-fn vm<W: Write>(
-    program: Program,
-    output: &mut W,
-    symbol_table: SymbolTable,
-    constants: Vec<Object>,
-    globals: Box<[Object; GLOBAL_SIZE]>,
-) -> Result<(), Box<dyn Error>> {
-    let mut compiler = Compiler::new_with_state(symbol_table, constants);
-    compiler.compile(program)?;
-    let mut vm = VM::new_with_globals_store(compiler.byte_code(), globals);
-    vm.run()?;
-    if !matches!(vm.stack_top(), Object::Null) {
-        write_flush(output, format!("{}\n", vm.stack_top()).as_bytes());
-    }
-    Ok(())
-}
+// fn vm<W: Write>(
+//     program: Program,
+//     output: &mut W,
+//     symbol_table: SymbolTable,
+//     constants: Vec<Object>,
+//     globals: Box<[Object; GLOBAL_SIZE]>,
+// ) -> Result<(), Box<dyn Error>> {
+//     let mut compiler = Compiler::new_with_state(symbol_table, constants);
+//     compiler.compile(program)?;
+//     let mut vm = VM::new_with_globals_store(compiler.byte_code(), globals);
+//     vm.run()?;
+//     if !matches!(vm.stack_top(), Object::Null) {
+//         write_flush(output, format!("{}\n", vm.stack_top()).as_bytes());
+//     }
+//     Ok(())
+// }
 
 fn print_parser_errors<W: Write>(output: &mut W, errors: &[String]) {
     write_flush(output, b"Parser errors:\n");

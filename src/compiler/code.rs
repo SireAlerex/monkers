@@ -27,6 +27,8 @@ pub enum Op {
     Call,
     ReturnValue,
     Return,
+    GetLocal,
+    SetLocal,
 }
 
 impl Op {
@@ -39,6 +41,7 @@ impl Op {
             | Self::SetGlobal
             | Self::Array
             | Self::Hash => &[2],
+            Self::GetLocal | Self::SetLocal | Self::Call => &[1],
             Self::Add
             | Self::Pop
             | Self::Sub
@@ -53,7 +56,6 @@ impl Op {
             | Self::Bang
             | Self::Null
             | Self::Index
-            | Self::Call
             | Self::ReturnValue
             | Self::Return => &[],
         }
@@ -85,6 +87,8 @@ impl Op {
             21 => Self::Call,
             22 => Self::ReturnValue,
             23 => Self::Return,
+            24 => Self::GetLocal,
+            25 => Self::SetLocal,
             _ => panic!(),
         }
     }
@@ -103,6 +107,7 @@ impl Op {
         for (i, operand) in operands.iter().enumerate() {
             let width = def[i];
             match width {
+                1 => instruction[offset] = *operand as u8,
                 2 => utils::write_u16(&mut instruction[offset..=offset + 1], *operand),
                 _ => {}
             }
@@ -118,6 +123,7 @@ impl Op {
 
         for (i, width) in self.lookup().iter().enumerate() {
             match width {
+                1 => operands[i] = ins[offset] as u64,
                 2 => operands[i] = utils::read_u16(&ins[offset..=offset + 1]) as u64,
                 _ => panic!("can't read operand from width={width}"),
             }

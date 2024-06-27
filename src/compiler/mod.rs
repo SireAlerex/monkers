@@ -1,3 +1,9 @@
+use std::{
+    borrow::Borrow,
+    cell::{RefCell, RefMut},
+    rc::Rc,
+};
+
 use crate::interpreter::{
     ast::{Expr, Literal, Operator, Program, Stmt},
     evaluator::object::Object,
@@ -21,7 +27,7 @@ macro_rules! err {
 #[derive(Debug, Clone)]
 pub struct Compiler {
     constants: Vec<Object>,
-    symbol_table: SymbolTable,
+    symbol_table: Rc<RefCell<SymbolTable>>,
     scopes: Vec<Scope>,
     scope_index: usize,
 }
@@ -48,16 +54,16 @@ impl Compiler {
     pub fn new() -> Self {
         Self {
             constants: Vec::new(),
-            symbol_table: SymbolTable::new(),
+            symbol_table: Rc::new(RefCell::new(SymbolTable::new())),
             scopes: vec![Scope::new()],
             scope_index: 0,
         }
     }
 
-    pub fn new_with_state(symbol_table: SymbolTable, constants: Vec<Object>) -> Self {
+    pub fn new_with_state(symbol_table: &Rc<RefCell<SymbolTable>>, constants: Vec<Object>) -> Self {
         Self {
             constants,
-            symbol_table,
+            symbol_table: Rc::clone(symbol_table),
             scopes: vec![Scope::new()],
             scope_index: 0,
         }
@@ -78,8 +84,13 @@ impl Compiler {
             }
             Stmt::Let(name, expr) => {
                 self.compile_expr(expr)?;
-                let symbol = self.symbol_table.define(name);
-                let _ = self.emit(Op::SetGlobal, &[symbol.index() as u64]);
+                let symbol = self.symbol_table.borrow_mut().define(name);
+                let _ = match symbol.scope {
+                    symbol_table::Scope::Global => {
+                        self.emit(Op::SetGlobal, &[symbol.index() as u64])
+                    }
+                    symbol_table::Scope::Local => self.emit(Op::SetLocal, &[symbol.index() as u64]),
+                };
             }
             Stmt::Return(expr) => {
                 self.compile_expr(expr)?;
@@ -155,8 +166,16 @@ impl Compiler {
                 self.change_operand(jump_pos, after_alternative_pos as u64);
             }
             Expr::Ident(name) => {
-                if let Some(symbol) = self.symbol_table.resolve(&name) {
-                    let _ = self.emit(Op::GetGlobal, &[symbol.index() as u64]);
+                let sym = self.symbol_table.borrow_mut().resolve(&name);
+                if let Some(symbol) = sym {
+                    let _ = match symbol.scope {
+                        symbol_table::Scope::Global => {
+                            self.emit(Op::GetGlobal, &[symbol.index() as u64])
+                        }
+                        symbol_table::Scope::Local => {
+                            self.emit(Op::GetLocal, &[symbol.index() as u64])
+                        }
+                    };
                 } else {
                     return err!("undefined variable: {name}");
                 }
@@ -181,11 +200,16 @@ impl Compiler {
                 self.compile_expr(*index)?;
                 let _ = self.emit(Op::Index, &[]);
             }
-            Expr::FunctionLiteral {
-                parameters: _,
-                body,
-            } => {
+            Expr::FunctionLiteral { parameters, body } => {
+                let param_count = parameters.len();
                 self.enter_scope();
+                {
+                    // droping ref mut on self after scope
+                    let mut table: RefMut<'_, SymbolTable> = self.symbol_table.borrow_mut();
+                    for param in parameters {
+                        table.define(param);
+                    }
+                }
                 self.compile(body)?;
 
                 if self.last_instruction_is(Op::Pop) {
@@ -195,17 +219,24 @@ impl Compiler {
                     let _ = self.emit(Op::Return, &[]);
                 }
 
+                let table: &RefCell<SymbolTable> = self.symbol_table.borrow();
+                let locals_count = table.borrow().num_definitions;
                 let ins = self.leave_scope();
-                let compiled_function = Object::CompiledFunction(ins);
+                let compiled_function = Object::CompiledFunction(ins, locals_count, param_count);
                 let index = self.add_constant(compiled_function);
                 let _ = self.emit(Op::Constant, &[index as u64]);
             }
             Expr::Call {
                 function,
-                arguments: _,
+                arguments,
             } => {
+                let arg_count = arguments.len();
                 self.compile_expr(*function)?;
-                let _ = self.emit(Op::Call, &[]);
+                for arg in arguments {
+                    self.compile_expr(arg)?;
+                }
+
+                let _ = self.emit(Op::Call, &[arg_count as u64]);
             }
         }
 
@@ -300,11 +331,16 @@ impl Compiler {
     fn enter_scope(&mut self) {
         self.scopes.push(Scope::new());
         self.scope_index += 1;
+        let table = SymbolTable::new_enclosed(Rc::clone(&self.symbol_table));
+        self.symbol_table = Rc::new(RefCell::new(table));
     }
 
     fn leave_scope(&mut self) -> Instructions {
         let scope = self.scopes.remove(self.scope_index);
         self.scope_index -= 1;
+        let binding = self.symbol_table.clone();
+        let table: &RefCell<SymbolTable> = binding.borrow();
+        self.symbol_table = Rc::clone(table.borrow().outer.as_ref().unwrap());
 
         scope.instructions
     }
@@ -316,7 +352,7 @@ impl Compiler {
         }
     }
 
-    pub fn consume(self) -> (SymbolTable, Vec<Object>) {
+    pub fn consume(self) -> (Rc<RefCell<SymbolTable>>, Vec<Object>) {
         (self.symbol_table, self.constants)
     }
 }
@@ -334,10 +370,10 @@ struct EmittedInstruction {
 
 #[cfg(test)]
 mod test {
-    use std::error::Error;
+    use std::{borrow::Borrow, cell::RefCell, error::Error, rc::Rc};
 
     use crate::{
-        compiler::Compiler,
+        compiler::{symbol_table::SymbolTable, Compiler},
         interpreter::{evaluator::object::Object, parser::Parser},
     };
 
@@ -357,7 +393,7 @@ mod test {
     ) -> Result<(), Box<dyn Error>> {
         for test in tests {
             let mut compiler = Compiler::new();
-            let program = Parser::parse(test.0);
+            let program = Parser::parse(test.0)?;
             compiler.compile(program.clone())?;
             let byte_code = compiler.byte_code();
 
@@ -397,8 +433,70 @@ mod test {
         Instructions::vec(op.make(operands))
     }
 
-    fn fct(vec: Vec<Instructions>) -> Object {
-        Object::CompiledFunction(flatten(vec))
+    fn fct(vec: Vec<Instructions>, locals: usize, params: usize) -> Object {
+        Object::CompiledFunction(flatten(vec), locals, params)
+    }
+
+    #[test]
+    fn let_scope_test() -> Result<(), Box<dyn Error>> {
+        compile_test(&[
+            (
+                "let num = 55; fn() { num }",
+                vec![
+                    Object::Integer(55),
+                    fct(
+                        vec![ins(Op::GetGlobal, &[0]), ins(Op::ReturnValue, &[])],
+                        0,
+                        0,
+                    ),
+                ],
+                vec![
+                    ins(Op::Constant, &[0]),
+                    ins(Op::SetGlobal, &[0]),
+                    ins(Op::Constant, &[1]),
+                    ins(Op::Pop, &[]),
+                ],
+            ),
+            (
+                "fn() { let num = 55; num }",
+                vec![
+                    Object::Integer(55),
+                    fct(
+                        vec![
+                            ins(Op::Constant, &[0]),
+                            ins(Op::SetLocal, &[0]),
+                            ins(Op::GetLocal, &[0]),
+                            ins(Op::ReturnValue, &[]),
+                        ],
+                        1,
+                        0,
+                    ),
+                ],
+                vec![ins(Op::Constant, &[1]), ins(Op::Pop, &[])],
+            ),
+            (
+                "fn() { let a = 55; let b = 77; a + b }",
+                vec![
+                    Object::Integer(55),
+                    Object::Integer(77),
+                    fct(
+                        vec![
+                            ins(Op::Constant, &[0]),
+                            ins(Op::SetLocal, &[0]),
+                            ins(Op::Constant, &[1]),
+                            ins(Op::SetLocal, &[1]),
+                            ins(Op::GetLocal, &[0]),
+                            ins(Op::GetLocal, &[1]),
+                            ins(Op::Add, &[]),
+                            ins(Op::ReturnValue, &[]),
+                        ],
+                        2,
+                        0,
+                    ),
+                ],
+                vec![ins(Op::Constant, &[2]), ins(Op::Pop, &[])],
+            ),
+        ])
     }
 
     #[test]
@@ -408,11 +506,15 @@ mod test {
                 "fn() { 24 }()",
                 vec![
                     Object::Integer(24),
-                    fct(vec![ins(Op::Constant, &[0]), ins(Op::ReturnValue, &[])]),
+                    fct(
+                        vec![ins(Op::Constant, &[0]), ins(Op::ReturnValue, &[])],
+                        0,
+                        0,
+                    ),
                 ],
                 vec![
                     ins(Op::Constant, &[1]),
-                    ins(Op::Call, &[]),
+                    ins(Op::Call, &[0]),
                     ins(Op::Pop, &[]),
                 ],
             ),
@@ -420,13 +522,66 @@ mod test {
                 "let noArg = fn() { 24 }; noArg();",
                 vec![
                     Object::Integer(24),
-                    fct(vec![ins(Op::Constant, &[0]), ins(Op::ReturnValue, &[])]),
+                    fct(
+                        vec![ins(Op::Constant, &[0]), ins(Op::ReturnValue, &[])],
+                        0,
+                        0,
+                    ),
                 ],
                 vec![
                     ins(Op::Constant, &[1]),
                     ins(Op::SetGlobal, &[0]),
                     ins(Op::GetGlobal, &[0]),
-                    ins(Op::Call, &[]),
+                    ins(Op::Call, &[0]),
+                    ins(Op::Pop, &[]),
+                ],
+            ),
+            (
+                "let oneArg = fn(a) { a }; oneArg(24);",
+                vec![
+                    fct(
+                        vec![ins(Op::GetLocal, &[0]), ins(Op::ReturnValue, &[])],
+                        1,
+                        1,
+                    ),
+                    Object::Integer(24),
+                ],
+                vec![
+                    ins(Op::Constant, &[0]),
+                    ins(Op::SetGlobal, &[0]),
+                    ins(Op::GetGlobal, &[0]),
+                    ins(Op::Constant, &[1]),
+                    ins(Op::Call, &[1]),
+                    ins(Op::Pop, &[]),
+                ],
+            ),
+            (
+                "let manyArg = fn(a, b, c) { a; b; c }; manyArg(24, 25, 26);",
+                vec![
+                    fct(
+                        vec![
+                            ins(Op::GetLocal, &[0]),
+                            ins(Op::Pop, &[]),
+                            ins(Op::GetLocal, &[1]),
+                            ins(Op::Pop, &[]),
+                            ins(Op::GetLocal, &[2]),
+                            ins(Op::ReturnValue, &[]),
+                        ],
+                        3,
+                        3,
+                    ),
+                    Object::Integer(24),
+                    Object::Integer(25),
+                    Object::Integer(26),
+                ],
+                vec![
+                    ins(Op::Constant, &[0]),
+                    ins(Op::SetGlobal, &[0]),
+                    ins(Op::GetGlobal, &[0]),
+                    ins(Op::Constant, &[1]),
+                    ins(Op::Constant, &[2]),
+                    ins(Op::Constant, &[3]),
+                    ins(Op::Call, &[3]),
                     ins(Op::Pop, &[]),
                 ],
             ),
@@ -441,12 +596,16 @@ mod test {
                 vec![
                     Object::Integer(5),
                     Object::Integer(10),
-                    fct(vec![
-                        ins(Op::Constant, &[0]),
-                        ins(Op::Constant, &[1]),
-                        ins(Op::Add, &[]),
-                        ins(Op::ReturnValue, &[]),
-                    ]),
+                    fct(
+                        vec![
+                            ins(Op::Constant, &[0]),
+                            ins(Op::Constant, &[1]),
+                            ins(Op::Add, &[]),
+                            ins(Op::ReturnValue, &[]),
+                        ],
+                        0,
+                        0,
+                    ),
                 ],
                 vec![ins(Op::Constant, &[2]), ins(Op::Pop, &[])],
             ),
@@ -455,12 +614,16 @@ mod test {
                 vec![
                     Object::Integer(5),
                     Object::Integer(10),
-                    fct(vec![
-                        ins(Op::Constant, &[0]),
-                        ins(Op::Constant, &[1]),
-                        ins(Op::Add, &[]),
-                        ins(Op::ReturnValue, &[]),
-                    ]),
+                    fct(
+                        vec![
+                            ins(Op::Constant, &[0]),
+                            ins(Op::Constant, &[1]),
+                            ins(Op::Add, &[]),
+                            ins(Op::ReturnValue, &[]),
+                        ],
+                        0,
+                        0,
+                    ),
                 ],
                 vec![ins(Op::Constant, &[2]), ins(Op::Pop, &[])],
             ),
@@ -469,18 +632,22 @@ mod test {
                 vec![
                     Object::Integer(1),
                     Object::Integer(2),
-                    fct(vec![
-                        ins(Op::Constant, &[0]),
-                        ins(Op::Pop, &[]),
-                        ins(Op::Constant, &[1]),
-                        ins(Op::ReturnValue, &[]),
-                    ]),
+                    fct(
+                        vec![
+                            ins(Op::Constant, &[0]),
+                            ins(Op::Pop, &[]),
+                            ins(Op::Constant, &[1]),
+                            ins(Op::ReturnValue, &[]),
+                        ],
+                        0,
+                        0,
+                    ),
                 ],
                 vec![ins(Op::Constant, &[2]), ins(Op::Pop, &[])],
             ),
             (
                 "fn() { }",
-                vec![fct(vec![ins(Op::Return, &[])])],
+                vec![fct(vec![ins(Op::Return, &[])], 0, 0)],
                 vec![ins(Op::Constant, &[0]), ins(Op::Pop, &[])],
             ),
         ])
@@ -490,8 +657,11 @@ mod test {
     fn scope_test() {
         let mut compiler = Compiler::new();
         assert_eq!(compiler.scope_index, 0);
+        let global_table = Rc::clone(&compiler.symbol_table);
 
         compiler.emit(Op::Mul, &[]);
+
+        // Entering scope
         compiler.enter_scope();
         assert_eq!(compiler.scope_index, 1);
 
@@ -508,8 +678,23 @@ mod test {
             Op::Sub
         );
 
+        let sym = Rc::clone(&compiler.symbol_table);
+        let table: &RefCell<SymbolTable> = sym.borrow();
+        let outer = &table.borrow().outer;
+        assert!(outer.is_some());
+        if let Some(table) = outer {
+            assert_eq!(table, &global_table);
+        }
+
         compiler.leave_scope();
+        // Leaving scope
+
         assert_eq!(compiler.scope_index, 0);
+        assert_eq!(compiler.symbol_table, global_table.clone());
+        let sym = Rc::clone(&compiler.symbol_table);
+        let table: &RefCell<SymbolTable> = sym.borrow();
+        let outer = &table.borrow().outer;
+        assert!(outer.is_none());
 
         compiler.emit(Op::Add, &[]);
         assert_eq!(
@@ -947,7 +1132,7 @@ mod test {
 
     #[test]
     fn read_operands_test() {
-        let tests = &[(Op::Constant, &[65535], 2)];
+        let tests = &[(Op::Constant, &[65535], 2), (Op::GetLocal, &[255], 1)];
 
         for test in tests {
             let ins = test.0.make(test.1);
@@ -967,8 +1152,9 @@ mod test {
                 Instructions::vec(Op::Add.make(&[])),
                 Instructions::vec(Op::Constant.make(&[2])),
                 Instructions::vec(Op::Constant.make(&[65535])),
+                Instructions::vec(Op::GetLocal.make(&[1])),
             ],
-            "0000 OpAdd\n0001 OpConstant 2\n0004 OpConstant 65535",
+            "0000 OpAdd\n0001 OpConstant 2\n0004 OpConstant 65535\n0007 OpGetLocal 1",
         )];
 
         for test in tests {
@@ -990,6 +1176,7 @@ mod test {
                 vec![Op::Constant as u8, 0xFF, 0xFE],
             ),
             (Op::Add, vec![], vec![Op::Add as u8]),
+            (Op::GetLocal, vec![255], vec![Op::GetLocal as u8, 0xFF]),
         ];
 
         for test in tests {
