@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::{
+    compiler::chunk::Instructions,
     interpreter::ast::{Block, Ident, Literal},
     utils,
 };
@@ -56,7 +57,8 @@ pub enum Object {
     Uninit,                         //0
     Error(String),                  //24
     Function(Function),             // 56
-    Builtin(BuiltinFunction),       // 8
+    CompiledFunction(Instructions),
+    Builtin(BuiltinFunction), // 8
 }
 
 impl Add<Self> for Object {
@@ -170,6 +172,7 @@ impl Object {
             Self::Null => String::from("NULL"),
             Self::Uninit => panic!("Uninit object"),
             Self::Function { .. } => String::from("FUNCTION"),
+            Self::CompiledFunction { .. } => String::from("COMPILED_FUNCTION"),
             Self::Builtin(_) => String::from("BUILTIN_FUNCTION"),
             Self::Error(_) => String::from("ERROR"),
         }
@@ -209,6 +212,7 @@ impl Display for Object {
             Self::Uninit => panic!("Uninit object"),
             Self::Returned(obj) => write!(f, "{obj}"),
             Self::Function(function) => write!(f, "{function}"),
+            Self::CompiledFunction(ins) => write!(f, "compiled_function: {ins}"),
             Self::Builtin(func) => write!(f, "builtin({func:?})"),
         }
     }

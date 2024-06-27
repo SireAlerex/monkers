@@ -24,6 +24,9 @@ pub enum Op {
     Array,
     Hash,
     Index,
+    Call,
+    ReturnValue,
+    Return,
 }
 
 impl Op {
@@ -49,7 +52,10 @@ impl Op {
             | Self::Minus
             | Self::Bang
             | Self::Null
-            | Self::Index => &[],
+            | Self::Index
+            | Self::Call
+            | Self::ReturnValue
+            | Self::Return => &[],
         }
     }
 
@@ -76,6 +82,9 @@ impl Op {
             18 => Self::Array,
             19 => Self::Hash,
             20 => Self::Index,
+            21 => Self::Call,
+            22 => Self::ReturnValue,
+            23 => Self::Return,
             _ => panic!(),
         }
     }

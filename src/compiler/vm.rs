@@ -51,36 +51,70 @@ const TRUE: Object = Object::Boolean(true);
 const FALSE: Object = Object::Boolean(false);
 const NULL: Object = Object::Null;
 pub const GLOBAL_SIZE: usize = 65536;
+const MAX_FRAMES: usize = 1024;
+
+#[derive(Debug, Clone)]
+pub struct Frame {
+    func: Instructions,
+    ip: usize,
+}
+
+impl Frame {
+    pub const fn from_instructions(func: Instructions) -> Self {
+        Self { func, ip: 0 }
+    }
+}
+
+impl Default for Frame {
+    fn default() -> Self {
+        Self {
+            func: Instructions::new(),
+            ip: Default::default(),
+        }
+    }
+}
 
 // to avoid allocation, stack of &Object, pointing to alloc handler
+#[derive(Debug, Clone)]
 pub struct VM {
     constants: Vec<Object>,
-    instructions: Instructions,
     stack: Box<[Object; STACK_SIZE]>,
     sp: usize,
     // heap allocated
     globals: Box<[Object]>,
+    frames: Vec<Frame>,
+    frame_index: usize,
 }
 
 impl VM {
     #[allow(dead_code)]
     pub fn new(byte_code: ByteCode) -> Self {
+        let mut frames = vec![Frame::default(); MAX_FRAMES];
+        let main_frame = Frame::from_instructions(byte_code.instructions);
+        frames[0] = main_frame;
+
         Self {
             constants: byte_code.constants,
-            instructions: byte_code.instructions,
             stack: Box::new([UNINT_OBJECT; STACK_SIZE]),
             sp: 0,
             globals: vec![UNINT_OBJECT; GLOBAL_SIZE].into_boxed_slice(),
+            frames,
+            frame_index: 1,
         }
     }
 
     pub fn new_with_globals_store(byte_code: ByteCode, globals: Box<[Object]>) -> Self {
+        let mut frames = vec![Frame::default(); MAX_FRAMES];
+        let main_frame = Frame::from_instructions(byte_code.instructions);
+        frames[0] = main_frame;
+
         Self {
             constants: byte_code.constants,
-            instructions: byte_code.instructions,
             stack: Box::new([UNINT_OBJECT; STACK_SIZE]),
             sp: 0,
             globals,
+            frames,
+            frame_index: 1,
         }
     }
 
@@ -91,14 +125,14 @@ impl VM {
     #[allow(unreachable_patterns)]
     pub fn run(&mut self) -> Result<(), String> {
         // println!("vm run ins:{:?}", self.instructions.to_string());
-        let mut ip = 0;
-        while ip < self.instructions.0.len() {
-            // println!("loop ip={ip}");
-            let op: Op = Op::from_u8(self.instructions[ip]);
+        while self.current_frame().ip < self.current_frame().func.0.len() {
+            let ip = self.current_frame().ip;
+            let ins = &mut self.current_frame().func;
+            let op: Op = Op::from_u8(ins[ip]);
 
             match op {
                 Op::Constant => {
-                    let idx = self.next_two_bytes(&mut ip);
+                    let idx = self.next_two_bytes();
                     self.push(self.constants[idx as usize].clone())?;
                 }
                 Op::Add => check_binary!(self, add),
@@ -130,37 +164,38 @@ impl VM {
                     obj => return err!("unsupported type for negation: {}", obj.get_type()),
                 },
                 Op::Jump => {
-                    let pos = utils::read_u16(&self.instructions.0[ip + 1..]);
-                    ip = pos as usize - 1;
+                    let start = ip + 1;
+                    let pos = utils::read_u16(&ins.0[start..]);
+                    self.current_frame().ip = pos as usize - 1;
                 }
                 Op::JumpNotTruthy => {
-                    let pos = self.next_two_bytes(&mut ip);
+                    let pos = self.next_two_bytes();
 
                     let cond = self.pop();
                     if !cond.is_truthy() {
-                        ip = pos as usize - 1;
+                        self.current_frame().ip = pos as usize - 1;
                     }
                 }
                 Op::Null => null!(self)?,
                 Op::SetGlobal => {
-                    let global_idx = self.next_two_bytes(&mut ip);
+                    let global_idx = self.next_two_bytes();
 
                     self.globals[global_idx as usize] = self.pop();
                 }
                 Op::GetGlobal => {
-                    let global_idx = self.next_two_bytes(&mut ip);
+                    let global_idx = self.next_two_bytes();
 
                     self.push(self.globals[global_idx as usize].clone())?;
                 }
                 Op::Array => {
-                    let elem_count = self.next_two_bytes(&mut ip);
+                    let elem_count = self.next_two_bytes();
 
                     let array = self.build_array(self.sp - elem_count as usize, self.sp);
                     self.sp -= elem_count as usize;
                     self.push(array)?;
                 }
                 Op::Hash => {
-                    let elem_count = self.next_two_bytes(&mut ip);
+                    let elem_count = self.next_two_bytes();
 
                     let hash = self.build_hash(self.sp - elem_count as usize, self.sp)?;
                     self.push(hash)?;
@@ -168,12 +203,35 @@ impl VM {
                 Op::Index => {
                     check_binary_ref!(self, get_unchecked_key);
                 }
+                Op::Call => {
+                    match self.stack[self.sp - 1].clone() {
+                        Object::CompiledFunction(func) => {
+                            self.push_frame(Frame::from_instructions(func));
+                        }
+                        obj => panic!("calling non-function type: {}", obj.get_type()),
+                    }
+                    continue;
+                }
+                Op::ReturnValue => {
+                    let value = self.pop();
+
+                    self.pop_frame();
+                    self.pop();
+
+                    self.push(value)?;
+                }
+                Op::Return => {
+                    // TODO: implement and add test
+                    self.pop_frame();
+                    self.pop();
+
+                    self.push(NULL)?;
+                }
                 op => err!("'{op:?}' is unimplemented for vm")?,
             }
 
-            ip += 1;
+            self.current_frame().ip += 1;
         }
-
         Ok(())
     }
 
@@ -204,9 +262,10 @@ impl VM {
         Object::Array(elements)
     }
 
-    fn next_two_bytes(&mut self, ip: &mut usize) -> u16 {
-        let global_idx = utils::read_u16(&self.instructions.0[*ip + 1..]);
-        *ip += 2;
+    fn next_two_bytes(&mut self) -> u16 {
+        let start = self.current_frame().ip + 1;
+        let global_idx = utils::read_u16(&self.current_frame().func.0[start..]);
+        self.current_frame().ip += 2;
         global_idx
     }
 
@@ -225,6 +284,21 @@ impl VM {
 
             Ok(())
         }
+    }
+
+    fn current_frame(&mut self) -> &mut Frame {
+        self.frames.get_mut(self.frame_index - 1).unwrap()
+    }
+
+    fn push_frame(&mut self, frame: Frame) {
+        self.frames[self.frame_index] = frame;
+        self.frame_index += 1;
+    }
+
+    fn pop_frame(&mut self) -> Frame {
+        self.frame_index -= 1;
+        // TODO &mut instead of clone ?
+        self.frames[self.frame_index].clone()
     }
 
     // used in tests
@@ -262,7 +336,13 @@ mod test {
         for test in tests {
             let mut compiler = Compiler::new();
             compiler.compile(Parser::parse(test.0))?;
-
+            println!(
+                "Testing input: '{}'\nBytecode:\n{}\n({:?})",
+                test.0,
+                compiler.byte_code().instructions,
+                compiler.byte_code().instructions
+            );
+            println!("Constants:\n{:?}", compiler.byte_code().constants);
             let mut vm = VM::new(compiler.byte_code());
             vm.run()?;
             let stack_elem = vm.stack_top();
@@ -288,6 +368,42 @@ mod test {
             hash.insert(k.into(), v.into());
         }
         Object::Hash(hash)
+    }
+
+    #[test]
+    fn first_class_function_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("let returnsOne = fn() { 1; }; let returnsOneReturner = fn() { returnsOne; }; returnsOneReturner()();", 1),
+        ])
+    }
+
+    #[test]
+    fn function_without_return_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("let noReturn = fn() { }; noReturn();", Object::Null),
+            ("let noReturn = fn() { }; let noReturnTwo = fn() { noReturn(); }; noReturn(); noReturnTwo();", Object::Null),
+        ])
+    }
+
+    #[test]
+    fn early_exit_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("let earlyExit = fn() { return 99; 100; }; earlyExit();", 99),
+            (
+                "let earlyExit = fn() { return 99; return 100; }; earlyExit();",
+                99,
+            ),
+        ])
+    }
+
+    #[test]
+    fn call_no_arg_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("let fivePlusTen = fn() { 5 + 10; }; fivePlusTen();", 15),
+            ("let one = fn() { 5 }; let two = fn() { one() }; let three = fn() { two() }; three();", 5),
+            ("let one = fn() { 1; }; let two = fn() { 2; }; one() + two()", 3),
+            ("let a = fn() { 1 }; let b = fn() { a() + 1 }; let c = fn() { b() + 1 }; c();", 3),
+        ])
     }
 
     #[test]
