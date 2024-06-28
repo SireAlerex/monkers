@@ -5,7 +5,13 @@ use std::{
 
 use crate::{
     compiler::code::Op,
-    interpreter::{ast::Literal, evaluator::object::Object},
+    interpreter::{
+        ast::Literal,
+        evaluator::{
+            builtin::BuiltinFunctions,
+            object::{Object, NULL, UNINT_OBJECT},
+        },
+    },
     utils,
 };
 
@@ -13,7 +19,7 @@ use super::{chunk::Instructions, ByteCode};
 
 macro_rules! null {
     ($self: ident) => {
-        $self.push(Object::Null)
+        $self.push(NULL)
     };
 }
 
@@ -46,10 +52,8 @@ macro_rules! check_binary_ref {
 }
 
 const STACK_SIZE: usize = 2048;
-pub const UNINT_OBJECT: Object = Object::Uninit;
 const TRUE: Object = Object::Boolean(true);
 const FALSE: Object = Object::Boolean(false);
-const NULL: Object = Object::Null;
 pub const GLOBAL_SIZE: usize = 65536;
 const MAX_FRAMES: usize = 1024;
 
@@ -128,6 +132,7 @@ impl VM {
         self.stack[self.sp].clone()
     }
 
+    // TODO check for Object::Error
     #[allow(unreachable_patterns)]
     pub fn run(&mut self) -> Result<(), String> {
         while self.current_frame().ip < self.current_frame().func.0.len() {
@@ -222,10 +227,15 @@ impl VM {
                             let frame = Frame::new(func, self.sp - args_count as usize);
                             self.sp = frame.base_pointer + locals_count;
                             self.push_frame(frame);
+                            continue;
+                        }
+                        Object::Builtin(builtin) => {
+                            let args = &self.stack[self.sp - args_count as usize..self.sp];
+                            let result = builtin(args);
+                            self.push(result)?;
                         }
                         obj => panic!("calling non-function type: {}", obj.get_type()),
                     }
-                    continue;
                 }
                 Op::ReturnValue => {
                     let value = self.pop();
@@ -255,6 +265,10 @@ impl VM {
                     let obj = self.pop();
                     let frame = self.current_frame();
                     self.stack[frame.base_pointer + local_index as usize] = obj;
+                }
+                Op::GetBuiltin => {
+                    let index = self.next_byte();
+                    self.push(BuiltinFunctions::get_from_index(index as usize))?;
                 }
                 op => err!("'{op:?}' is unimplemented for vm")?,
             }
@@ -414,6 +428,48 @@ mod test {
             hash.insert(k.into(), v.into());
         }
         Object::Hash(hash)
+    }
+
+    #[test]
+    fn builtins_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            ("len(\"\")", 0),
+            ("len(\"four\")", 4),
+            ("len(\"hello world\")", 11),
+            ("len([1, 2, 3])", 3),
+            ("len([])", 0),
+            ("first([1, 2, 3])", 1),
+            ("last([1, 2, 3])", 3),
+        ])?;
+        vm_test(&[
+            (
+                "len(1)",
+                Object::Error("argument to 'len' not supported, got INTEGER".to_string()),
+            ),
+            (
+                "len(\"one\", \"two\")",
+                Object::Error("wrong number of arguments. got=2, want=1".to_string()),
+            ),
+            (
+                "first(1)",
+                Object::Error("argument to 'first' must be ARRAY, got INTEGER".to_string()),
+            ),
+            (
+                "last(1)",
+                Object::Error("argument to 'last' must be ARRAY, got INTEGER".to_string()),
+            ),
+            (
+                "push(1, 1)",
+                Object::Error("argument to 'push' must be ARRAY, got INTEGER".to_string()),
+            ),
+        ])?;
+        vm_test(&[
+            ("puts(\"hello\", \"world!\")", NULL),
+            ("first([])", NULL),
+            ("last([])", NULL),
+            ("rest([])", NULL),
+        ])?;
+        vm_test(&[("rest([1, 2, 3])", vec![2, 3]), ("push([], 1)", vec![1])])
     }
 
     #[test]

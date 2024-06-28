@@ -54,7 +54,7 @@ impl Compiler {
     pub fn new() -> Self {
         Self {
             constants: Vec::new(),
-            symbol_table: Rc::new(RefCell::new(SymbolTable::new())),
+            symbol_table: Rc::new(RefCell::new(SymbolTable::new_with_builtins())),
             scopes: vec![Scope::new()],
             scope_index: 0,
         }
@@ -90,6 +90,9 @@ impl Compiler {
                         self.emit(Op::SetGlobal, &[symbol.index() as u64])
                     }
                     symbol_table::Scope::Local => self.emit(Op::SetLocal, &[symbol.index() as u64]),
+                    symbol_table::Scope::Builtin => {
+                        todo!()
+                    }
                 };
             }
             Stmt::Return(expr) => {
@@ -174,6 +177,9 @@ impl Compiler {
                         }
                         symbol_table::Scope::Local => {
                             self.emit(Op::GetLocal, &[symbol.index() as u64])
+                        }
+                        symbol_table::Scope::Builtin => {
+                            self.emit(Op::GetBuiltin, &[symbol.index() as u64])
                         }
                     };
                 } else {
@@ -435,6 +441,41 @@ mod test {
 
     fn fct(vec: Vec<Instructions>, locals: usize, params: usize) -> Object {
         Object::CompiledFunction(flatten(vec), locals, params)
+    }
+
+    #[test]
+    fn builtins_test() -> Result<(), Box<dyn Error>> {
+        compile_test(&[
+            (
+                "len([]); push([], 1);",
+                vec![Object::Integer(1)],
+                vec![
+                    ins(Op::GetBuiltin, &[0]),
+                    ins(Op::Array, &[0]),
+                    ins(Op::Call, &[1]),
+                    ins(Op::Pop, &[]),
+                    ins(Op::GetBuiltin, &[4]),
+                    ins(Op::Array, &[0]),
+                    ins(Op::Constant, &[0]),
+                    ins(Op::Call, &[2]),
+                    ins(Op::Pop, &[]),
+                ],
+            ),
+            (
+                "fn() { len([]) }",
+                vec![fct(
+                    vec![
+                        ins(Op::GetBuiltin, &[0]),
+                        ins(Op::Array, &[0]),
+                        ins(Op::Call, &[1]),
+                        ins(Op::ReturnValue, &[]),
+                    ],
+                    0,
+                    0,
+                )],
+                vec![ins(Op::Constant, &[0]), ins(Op::Pop, &[])],
+            ),
+        ])
     }
 
     #[test]

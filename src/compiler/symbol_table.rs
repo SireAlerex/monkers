@@ -1,11 +1,12 @@
 use std::{borrow::Borrow, cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::interpreter::ast::Ident;
+use crate::interpreter::{ast::Ident, evaluator::builtin::BUILTINS};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Scope {
     Global,
     Local,
+    Builtin,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
@@ -37,6 +38,16 @@ impl SymbolTable {
         }
     }
 
+    pub fn new_with_builtins() -> Self {
+        let mut table = Self::new();
+
+        for (idx, name, _) in BUILTINS {
+            table.define_builtin((*name).to_string(), *idx);
+        }
+
+        table
+    }
+
     pub fn new_enclosed(outer: Rc<RefCell<Self>>) -> Self {
         Self {
             outer: Some(outer),
@@ -57,6 +68,16 @@ impl SymbolTable {
         };
         self.store.insert(name, symbol.clone());
         self.num_definitions += 1;
+        symbol
+    }
+
+    pub fn define_builtin(&mut self, name: String, idx: usize) -> Symbol {
+        let symbol = Symbol {
+            name: name.clone(),
+            scope: Scope::Builtin,
+            index: idx,
+        };
+        self.store.insert(name, symbol.clone());
         symbol
     }
 
@@ -81,6 +102,71 @@ mod test {
     use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
     use super::{Scope, Symbol, SymbolTable};
+
+    #[test]
+    fn builtins_test() {
+        let global = SymbolTable::new();
+
+        let glob = Rc::new(RefCell::new(global));
+        let first_local = SymbolTable::new_enclosed(Rc::clone(&glob));
+
+        let first = Rc::new(RefCell::new(first_local));
+        let second_local = SymbolTable::new_enclosed(Rc::clone(&first));
+
+        let mut expected = HashMap::new();
+        expected.insert(
+            "a".to_owned(),
+            Symbol {
+                name: "a".to_owned(),
+                scope: Scope::Builtin,
+                index: 0,
+            },
+        );
+        expected.insert(
+            "c".to_owned(),
+            Symbol {
+                name: "c".to_owned(),
+                scope: Scope::Builtin,
+                index: 1,
+            },
+        );
+        expected.insert(
+            "e".to_owned(),
+            Symbol {
+                name: "e".to_owned(),
+                scope: Scope::Builtin,
+                index: 2,
+            },
+        );
+        expected.insert(
+            "f".to_owned(),
+            Symbol {
+                name: "f".to_owned(),
+                scope: Scope::Builtin,
+                index: 3,
+            },
+        );
+
+        // for (idx, (k, _)) in expected.iter().enumerate() {
+        //     let mut table = glob.borrow_mut();
+        //     table.define_builtin(k.to_owned(), idx);
+        // }
+        {
+            let mut table = glob.borrow_mut();
+            table.define_builtin("a".to_owned(), 0);
+            table.define_builtin("c".to_owned(), 1);
+            table.define_builtin("e".to_owned(), 2);
+            table.define_builtin("f".to_owned(), 3);
+        }
+
+        for table in &[glob, first, Rc::new(RefCell::new(second_local))] {
+            for sym in expected.clone() {
+                let res = table.borrow().resolve(&sym.0);
+                assert!(res.is_some());
+                assert_eq!(res.unwrap(), sym.1);
+            }
+        }
+    }
 
     #[test]
     fn resolve_nested_local_test() {

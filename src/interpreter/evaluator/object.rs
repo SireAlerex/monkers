@@ -20,12 +20,6 @@ macro_rules! error {
     };
 }
 
-macro_rules! null {
-    () => {
-        Object::Null
-    };
-}
-
 macro_rules! int_op {
     ($trait: tt, $func: tt, $op: tt, $op_str: literal) => {
         impl $trait<Object> for Object {
@@ -43,7 +37,6 @@ macro_rules! int_op {
 }
 
 pub(crate) use error;
-pub(crate) use null;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Object {
@@ -60,6 +53,9 @@ pub enum Object {
     CompiledFunction(Instructions, usize, usize), // 24
     Builtin(BuiltinFunction),                     //  8
 }
+
+pub const NULL: Object = Object::Null;
+pub const UNINT_OBJECT: Object = Object::Uninit;
 
 impl Add<Self> for Object {
     type Output = Self;
@@ -86,13 +82,13 @@ impl Object {
         match (self, index) {
             (Self::Array(array), Self::Integer(i)) => {
                 if *i < 0 || *i >= array.len() as i64 {
-                    return null!();
+                    return NULL;
                 }
                 array[*i as usize].clone()
             }
             (Self::Hash(hash), _) => index.literal().map_or_else(
                 || error!("unusable as hash key: {}", index.get_type()),
-                |key| hash.get(&key).map_or_else(|| null!(), Clone::clone),
+                |key| hash.get(&key).map_or_else(|| NULL, Clone::clone),
             ),
             (_, _) => error!(
                 "index operation not supported: {}[{}]",
@@ -106,13 +102,13 @@ impl Object {
         match (self, index) {
             (Self::Array(array), Self::Integer(i)) => {
                 if *i < 0 || *i >= array.len() as i64 {
-                    return null!();
+                    return NULL;
                 }
                 array[*i as usize].clone()
             }
             (Self::Hash(hash), _) => hash
                 .get(&Literal::try_from(index).unwrap())
-                .map_or_else(|| null!(), Clone::clone),
+                .map_or_else(|| NULL, Clone::clone),
             (_, _) => error!(
                 "index operation not supported: {}[{}]",
                 self.get_type(),
@@ -138,6 +134,7 @@ impl Object {
     }
 
     fn op_error(left: &Self, right: &Self, op: &str) -> Self {
+        println!("op_error left={left:?} right={right:?} op={op:?}");
         if core::mem::discriminant(left) == core::mem::discriminant(right) {
             error!(
                 "unknown operator: {} {op} {}",

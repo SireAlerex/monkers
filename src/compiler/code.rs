@@ -29,6 +29,7 @@ pub enum Op {
     Return,
     GetLocal,
     SetLocal,
+    GetBuiltin,
 }
 
 impl Op {
@@ -41,7 +42,7 @@ impl Op {
             | Self::SetGlobal
             | Self::Array
             | Self::Hash => &[2],
-            Self::GetLocal | Self::SetLocal | Self::Call => &[1],
+            Self::GetLocal | Self::SetLocal | Self::Call | Self::GetBuiltin => &[1],
             Self::Add
             | Self::Pop
             | Self::Sub
@@ -89,6 +90,7 @@ impl Op {
             23 => Self::Return,
             24 => Self::GetLocal,
             25 => Self::SetLocal,
+            26 => Self::GetBuiltin,
             _ => panic!(),
         }
     }

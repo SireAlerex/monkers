@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use builtin::BuiltinFunctions;
 use env::Environment;
-use object::{error, null, Object};
+use object::{error, Object, NULL};
 
 use super::ast::{Block, Expr, Literal, Operator, Program, Stmt};
 
@@ -37,7 +37,7 @@ impl Evaluator {
     }
 
     fn eval_block(&mut self, block: Block) -> Object {
-        let mut result = Object::Null;
+        let mut result = NULL;
         for stmt in block.0 {
             result = self.eval_stmt(stmt);
             if matches!(result, Object::Returned(_)) || matches!(result, Object::Error(_)) {
@@ -98,7 +98,7 @@ impl Evaluator {
                     self.eval_block(block)
                 } else {
                     // need to return null if condition is false and no alternative
-                    null!()
+                    NULL
                 }
             }
             Expr::Ident(name) => self.env.borrow().get(&name).unwrap_or_else(|| {
@@ -217,7 +217,7 @@ impl Evaluator {
         match op {
             Operator::Bang => match right {
                 Object::Boolean(b) => Object::Boolean(!b),
-                Object::Null => Object::Boolean(true),
+                &NULL => Object::Boolean(true),
                 _ => Object::Boolean(false),
             },
             Operator::Minus => {

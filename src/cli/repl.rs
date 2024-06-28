@@ -10,11 +10,14 @@ use std::{
 use crate::{
     compiler::{
         symbol_table::SymbolTable,
-        vm::{GLOBAL_SIZE, UNINT_OBJECT, VM},
+        vm::{GLOBAL_SIZE, VM},
         Compiler,
     },
     interpreter::{
-        evaluator::{object::Object, Evaluator},
+        evaluator::{
+            object::{Object, UNINT_OBJECT},
+            Evaluator,
+        },
         lexer::Lexer,
         parser::Parser,
         token::Source,
