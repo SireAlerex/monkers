@@ -4,7 +4,7 @@ use std::{
     fs::File,
     io::{BufRead, BufReader, Read, Write},
     path::Path,
-    rc::Rc,
+    rc::Rc, time::Instant,
 };
 
 use crate::{
@@ -12,56 +12,48 @@ use crate::{
         symbol_table::SymbolTable,
         vm::{GLOBAL_SIZE, VM},
         Compiler,
-    },
-    interpreter::{
-        evaluator::{
+    }, interpreter::{
+        ast::Program, evaluator::{
             object::{Object, UNINT_OBJECT},
             Evaluator,
-        },
-        lexer::Lexer,
-        parser::Parser,
-        token::Source,
-    },
+        }, lexer::Lexer, parser::Parser, token::Source
+    }, utils
 };
 
-#[allow(unused_variables, unused_mut)]
-pub fn start<R: BufRead, W: Write>(input: R, mut output: W) -> Result<Object, Box<dyn Error>> {
-    let mut evaluator = Evaluator::new();
-    let mut symbol_table = Rc::new(RefCell::new(SymbolTable::new()));
+enum ReturnValue {
+    Object(Object),
+    ObjectAndData(Object, Compiler, VM)
+}
+
+pub fn start<R: BufRead, W: Write>(input: R, mut output: W, tree_walk: bool, debug: bool) -> Result<Object, Box<dyn Error>> {
+    let mut symbol_table = Rc::new(RefCell::new(SymbolTable::new_with_builtins()));
     let mut constants: Vec<Object> = Vec::new();
     let mut globals = (vec![UNINT_OBJECT; GLOBAL_SIZE]).into_boxed_slice();
-    let mut last_stack_top = UNINT_OBJECT;
+    let mut last_obj = UNINT_OBJECT;
+
+    if tree_walk {
+        write_flush(&mut output, b"Tree-walk interpreter:\n");
+    } else {
+        write_flush(&mut output, b"Compiling for the VM:\n");
+    }
 
     write_flush(&mut output, b">> ");
     for line in input.lines().map_while(Result::ok) {
-        // eval_str(&line, &mut evaluator, &mut output, Source::Repl);
-
-        let mut parser = Parser::new(Lexer::new(&line, Source::Repl));
-        let program = parser.parse_program();
-
-        if parser.is_err() {
-            print_parser_errors(&mut output, parser.errors());
-            return Err("can't run code because of parsing errors".to_owned().into());
-        }
-
-        let mut compiler = Compiler::new_with_state(&symbol_table, constants);
-        compiler.compile(program)?;
-        let mut vm = VM::new_with_globals_store(compiler.byte_code(), globals);
-        vm.run()?;
-        last_stack_top = vm.stack_top();
-        if !matches!(vm.stack_top(), Object::Null) {
-            write_flush(&mut output, format!("{}\n", vm.stack_top()).as_bytes());
-        }
-
-        globals = vm.globals();
-        (symbol_table, constants) = compiler.consume();
+        if tree_walk {
+            last_obj = return_value_into_object(eval_str(&line, &mut Evaluator::new(), &mut output, Source::Repl, debug))?;
+        } else {
+            (last_obj, globals, (symbol_table, constants)) =  match vm(&line, &mut output, symbol_table, constants, globals, Source::Repl, debug)? {
+                ReturnValue::Object(_) => panic!("vm should return data"),
+                ReturnValue::ObjectAndData(obj, compiler, vm) => (obj, vm.globals(), compiler.consume()),
+            };
+        }       
 
         write_flush(&mut output, b">> ");
     }
-    Ok(last_stack_top)
+    Ok(last_obj)
 }
 
-pub fn read<W: Write>(file_path: String, mut output: W) -> Result<Object, Box<dyn Error>> {
+pub fn read<W: Write>(file_path: String, mut output: W, tree_walk: bool, debug: bool) -> Result<Object, Box<dyn Error>> {
     let path = Path::new(&file_path);
     let source = Source::File(
         path.file_stem()
@@ -75,74 +67,91 @@ pub fn read<W: Write>(file_path: String, mut output: W) -> Result<Object, Box<dy
 
     let input = String::from_utf8(content)?;
 
-    let mut parser = Parser::new(Lexer::new(&input, source));
-    let program = parser.parse_program();
-
-    if parser.is_err() {
-        print_parser_errors(&mut output, parser.errors());
-        return Err("can't run code because of parsing errors".to_owned().into());
-    }
-
-    let mut compiler = Compiler::new();
-    compiler.compile(program)?;
-    let mut vm = VM::new(compiler.byte_code());
-    vm.run()?;
-    if !matches!(vm.stack_top(), Object::Null) {
-        write_flush(&mut output, format!("{}\n", vm.stack_top()).as_bytes());
-    }
-
-    Ok(vm.stack_top())
+    let return_value = if tree_walk {
+        eval_str(&input, &mut Evaluator::new(), &mut output, source, debug)
+    } else {
+        vm(&input, &mut output, Rc::new(RefCell::new(SymbolTable::new_with_builtins())), Vec::new(), (vec![UNINT_OBJECT; GLOBAL_SIZE]).into_boxed_slice(), source, debug)
+    };
+    return_value_into_object(return_value)
 }
 
-// fn run<W: Write>(
-//     input: &str,
-//     output: &mut W,
-//     source: Source,
-//     symbol_table: SymbolTable,
-//     constants: Vec<Object>,
-//     globals: Box<[Object; GLOBAL_SIZE]>,
-// ) -> Result<(), Box<dyn Error>> {
-//     let mut parser = Parser::new(Lexer::new(input, source));
-//     let program = parser.parse_program();
+fn eval_str<W: Write>(input: &str, evaluator: &mut Evaluator, output: &mut W, source: Source, debug: bool) -> Result<ReturnValue, Box<dyn Error>> {
+    let program = parse(input, source, output, debug)?;
 
-//     if parser.is_err() {
-//         print_parser_errors(output, parser.errors());
-//         Err("can't run code because of parsing errors".to_owned().into())
-//     } else {
-//         vm(program, output, symbol_table, constants, globals)
-//     }
-// }
+    let eval = if debug {
+        let start = Instant::now();
+        let eval = evaluator.eval_program(program);
+        let end = start.elapsed();
+        println!("Evaluating execution time: {}", utils::fmt_duration(end));
+        eval
+    } else {
+        evaluator.eval_program(program)
+    };
 
-fn eval_str<W: Write>(input: &str, evaluator: &mut Evaluator, output: &mut W, source: Source) {
-    let mut parser = Parser::new(Lexer::new(input, source));
-    let program = parser.parse_program();
+    if !matches!(eval, Object::Null) {
+        write_flush(output, format!("{eval}\n").as_bytes());
+    }
+    Ok(ReturnValue::Object(eval))
+}
+
+fn vm<W: Write>(
+    input: &str,
+    output: &mut W,
+    symbol_table: Rc<RefCell<SymbolTable>>,
+    constants: Vec<Object>,
+    globals: Box<[Object]>,
+    source: Source,
+    debug: bool
+) -> Result<ReturnValue, Box<dyn Error>> {
+    let program = parse(input, source, output, debug)?;
+
+    let mut compiler = Compiler::new_with_state(&symbol_table, constants);
+    if debug {
+        let start = Instant::now();
+        compiler.compile(program)?;
+        let end = start.elapsed();
+        println!("Compiling execution time: {}", utils::fmt_duration(end));
+    } else {
+        compiler.compile(program)?;
+    }
+
+    let mut vm = VM::new_with_globals_store(compiler.byte_code(), globals);
+    if debug {
+        let start = Instant::now();
+        vm.run()?;
+        let end = start.elapsed();
+        println!("VM execution time: {}", utils::fmt_duration(end));
+    } else {
+        vm.run()?;
+    }
+
+    if !matches!(vm.stack_top(), Object::Null) {
+        write_flush(output, format!("{}\n", vm.stack_top()).as_bytes());
+    }
+
+    Ok(ReturnValue::ObjectAndData(vm.stack_top(), compiler, vm))
+}
+
+fn parse<W: Write>(input: &str, source: Source, output: &mut W, debug: bool) -> Result<Program, String> {
+    let mut parser = Parser::new(Lexer::new(&input, source));
+
+    let program = if debug {
+        let start = Instant::now();
+        let program = parser.parse_program();
+        let end = start.elapsed();
+        println!("Parsing execution time: {}", utils::fmt_duration(end));
+        program
+    } else {
+        parser.parse_program()
+    };
 
     if parser.is_err() {
         print_parser_errors(output, parser.errors());
+        Err("can't run code because of parsing errors".to_string())
     } else {
-        let eval = evaluator.eval_program(program);
-        if !matches!(eval, Object::Null) {
-            write_flush(output, format!("{eval}\n").as_bytes());
-        }
+        Ok(program)
     }
 }
-
-// fn vm<W: Write>(
-//     program: Program,
-//     output: &mut W,
-//     symbol_table: SymbolTable,
-//     constants: Vec<Object>,
-//     globals: Box<[Object; GLOBAL_SIZE]>,
-// ) -> Result<(), Box<dyn Error>> {
-//     let mut compiler = Compiler::new_with_state(symbol_table, constants);
-//     compiler.compile(program)?;
-//     let mut vm = VM::new_with_globals_store(compiler.byte_code(), globals);
-//     vm.run()?;
-//     if !matches!(vm.stack_top(), Object::Null) {
-//         write_flush(output, format!("{}\n", vm.stack_top()).as_bytes());
-//     }
-//     Ok(())
-// }
 
 fn print_parser_errors<W: Write>(output: &mut W, errors: &[String]) {
     write_flush(output, b"Parser errors:\n");
@@ -154,4 +163,14 @@ fn print_parser_errors<W: Write>(output: &mut W, errors: &[String]) {
 fn write_flush<W: Write>(output: &mut W, buf: &[u8]) {
     output.write_all(buf).expect("Error writing to output");
     output.flush().expect("Error flushing output");
+}
+
+fn return_value_into_object(value: Result<ReturnValue, Box<dyn Error>>) -> Result<Object, Box<dyn Error>> {
+    match value {
+        Ok(rv) => match rv {
+            ReturnValue::Object(obj) => Ok(obj),
+            ReturnValue::ObjectAndData(obj, _, _) => Ok(obj),
+        }
+        Err(e) => Err(e),
+    }
 }

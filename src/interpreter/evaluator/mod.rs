@@ -250,7 +250,7 @@ impl Evaluator {
             }
         }
 
-        Object::Hash(hash)
+        Object::Hash(Box::new(hash))
     }
 }
 
@@ -306,7 +306,7 @@ mod test {
                 true: 5,
                 false: 6
             }",
-                Object::Hash(hash),
+                Object::Hash(Box::new(hash)),
             ),
             ("{\"foo\": 5}[\"foo\"]", Object::Integer(5)),
             ("{\"foo\": 5}[\"bar\"]", Object::Null),
@@ -468,7 +468,7 @@ mod test {
     fn function_object_test() {
         let tests = [(
             "fn(x) { x + 2; };",
-            Object::Function(Function {
+            Object::Function(Box::new(Function {
                 parameters: vec!["x".to_string()],
                 body: Block(vec![Stmt::Expr(Expr::Infix(
                     Box::new(Expr::Ident("x".to_owned())),
@@ -476,7 +476,7 @@ mod test {
                     Box::new(Expr::Literal(Literal::Int(2))),
                 ))]),
                 env: Rc::new(RefCell::new(Environment::new())),
-            }),
+            })),
         )];
 
         check_tests(&tests);

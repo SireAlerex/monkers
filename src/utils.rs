@@ -19,9 +19,9 @@ pub fn write_u16(ins: &mut [u8], value: u64) {
 pub fn fmt_duration(duration: Duration) -> String {
     if duration.as_secs() > 1 {
         format!("{}s", duration.as_secs_f64())
-    } else if duration.as_micros() > 1 {
+    } else if duration.as_millis() > 1 {
         format!("{}ms", duration.as_millis())
     } else {
-        format!("{}ns", duration.as_micros())
+        format!("{}µs", duration.as_micros())
     }
 }

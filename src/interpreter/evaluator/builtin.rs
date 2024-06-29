@@ -52,6 +52,8 @@ impl BuiltinFunctions {
     }
 }
 
+// TODO: try doing builtin with Object::closure (map for example)
+
 fn len(args: &[Object]) -> Object {
     check_arg_count!(args, 1, "1");
 

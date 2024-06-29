@@ -38,18 +38,19 @@ macro_rules! int_op {
 
 pub(crate) use error;
 
+// TODO: try reduce type size with indirection
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Object {
     Integer(i64),                       //  8
     Boolean(bool),                      //  1
     String(String),                     // 24
-    Hash(HashMap<Literal, Object>),     // 48
+    Hash(Box<HashMap<Literal, Object>>),//  8
     Array(Vec<Object>),                 // 24
     Returned(Box<Object>),              //  8
     Null,                               //  0
     Uninit,                             //  0
     Error(String),                      // 24
-    Function(Function),                 // 56
+    Function(Box<Function>),            //  8
     CompiledFunction(CompiledFunction), // 40
     Closure(Closure),                   // 32
     Builtin(BuiltinFunction),           //  8
@@ -76,7 +77,7 @@ int_op!(Div, div, /, "/");
 
 impl Object {
     pub fn function(parameters: Vec<Ident>, body: Block, env: Rc<RefCell<Environment>>) -> Self {
-        Self::Function(Function::new(parameters, body, env))
+        Self::Function(Box::new(Function::new(parameters, body, env)))
     }
 
     pub fn get(&self, index: &Self) -> Self {

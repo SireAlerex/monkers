@@ -33,7 +33,7 @@ pub struct SymbolTable {
 }
 
 impl SymbolTable {
-    pub fn new() -> Self {
+    fn new() -> Self {
         Self {
             outer: None,
             store: HashMap::new(),

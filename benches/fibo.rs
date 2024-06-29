@@ -5,8 +5,7 @@ use monkers::{cli::repl, Object};
 
 #[inline]
 fn fibonacci(file: &str) -> Object {
-    let obj = repl::read(file.to_string(), stdout()).unwrap();
-    obj
+    repl::read(file.to_string(), stdout(), false, false).unwrap()
 }
 
 pub fn criterion_benchmark(c: &mut Criterion) {

@@ -340,7 +340,7 @@ impl VM {
             hash.insert(key, value);
         }
 
-        Ok(Object::Hash(hash))
+        Ok(Object::Hash(Box::new(hash)))
     }
 
     fn build_array(&mut self, start: usize, end: usize) -> Object {
@@ -481,7 +481,7 @@ mod test {
         for (k, v) in pairs {
             hash.insert(k.into(), v.into());
         }
-        Object::Hash(hash)
+        Object::Hash(Box::new(hash))
     }
 
     #[test]
