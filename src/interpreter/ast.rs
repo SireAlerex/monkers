@@ -36,6 +36,7 @@ pub enum Expr {
         alternative: Option<Block>,
     },
     FunctionLiteral {
+        name: String,
         parameters: Vec<Ident>,
         body: Block,
     },
@@ -164,8 +165,12 @@ impl Display for Expr {
                     s
                 }
             }
-            Self::FunctionLiteral { parameters, body } => {
-                format!("fn ({}) {{ {} }}", parameters.join(", "), body)
+            Self::FunctionLiteral {
+                name,
+                parameters,
+                body,
+            } => {
+                format!("fn {name}({}) {{ {} }}", parameters.join(", "), body)
             }
             Self::Call {
                 function,

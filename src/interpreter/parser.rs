@@ -152,7 +152,11 @@ fn parse_fn(parser: &mut Parser) -> Option<Expr> {
 
     let body = parser.parse_block();
 
-    Some(Expr::FunctionLiteral { parameters, body })
+    Some(Expr::FunctionLiteral {
+        name: String::new(),
+        parameters,
+        body,
+    })
 }
 
 fn parse_call(parser: &mut Parser, function: Expr) -> Option<Expr> {
@@ -373,10 +377,22 @@ impl<'a, 'b> Parser<'a> {
 
         let name: Ident = Token::ident(&self.cur_token)?;
 
-        self.check_peek(&Kind::Assign)?; // <--
+        self.check_peek(&Kind::Assign)?;
         self.next_token()?;
 
-        let value = self.parse_expression(Precedence::Lowest)?;
+        let mut value = self.parse_expression(Precedence::Lowest)?;
+        if let Expr::FunctionLiteral {
+            name: _,
+            parameters,
+            body,
+        } = value
+        {
+            value = Expr::FunctionLiteral {
+                name: name.clone(),
+                parameters,
+                body,
+            }
+        }
 
         if self.peek_token_is(&Kind::Semicolon) {
             self.next_token()?;
@@ -587,6 +603,21 @@ mod test {
     }
 
     #[test]
+    fn named_function_test() {
+        check_tests(&[(
+            "let myFunction = fn() { };",
+            Stmt::Let(
+                "myFunction".to_string(),
+                Expr::FunctionLiteral {
+                    name: "myFunction".to_string(),
+                    parameters: vec![],
+                    body: Block(vec![]),
+                },
+            ),
+        )]);
+    }
+
+    #[test]
     fn hash_test() {
         check_tests(&[
             (
@@ -718,6 +749,7 @@ mod test {
 
         let tests = vec![
             Stmt::Expr(Expr::FunctionLiteral {
+                name: String::new(),
                 parameters: vec!["x".to_owned(), "y".to_owned()],
                 body: Block(vec![Stmt::Expr(Expr::Infix(
                     Box::new(Expr::Ident("x".to_owned())),
@@ -726,14 +758,17 @@ mod test {
                 ))]),
             }),
             Stmt::Expr(Expr::FunctionLiteral {
+                name: String::new(),
                 parameters: vec![],
                 body: Block(vec![]),
             }),
             Stmt::Expr(Expr::FunctionLiteral {
+                name: String::new(),
                 parameters: vec!["x".to_owned()],
                 body: Block(vec![]),
             }),
             Stmt::Expr(Expr::FunctionLiteral {
+                name: String::new(),
                 parameters: vec!["x".to_owned(), "y".to_owned(), "z".to_owned()],
                 body: Block(vec![]),
             }),

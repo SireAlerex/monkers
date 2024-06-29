@@ -30,6 +30,9 @@ pub enum Op {
     GetLocal,
     SetLocal,
     GetBuiltin,
+    Closure,
+    GetFree,
+    CurrentClosure,
 }
 
 impl Op {
@@ -42,7 +45,7 @@ impl Op {
             | Self::SetGlobal
             | Self::Array
             | Self::Hash => &[2],
-            Self::GetLocal | Self::SetLocal | Self::Call | Self::GetBuiltin => &[1],
+            Self::GetLocal | Self::SetLocal | Self::Call | Self::GetBuiltin | Self::GetFree => &[1],
             Self::Add
             | Self::Pop
             | Self::Sub
@@ -58,7 +61,9 @@ impl Op {
             | Self::Null
             | Self::Index
             | Self::ReturnValue
-            | Self::Return => &[],
+            | Self::Return
+            | Self::CurrentClosure => &[],
+            Self::Closure => &[2, 1],
         }
     }
 
@@ -91,7 +96,10 @@ impl Op {
             24 => Self::GetLocal,
             25 => Self::SetLocal,
             26 => Self::GetBuiltin,
-            _ => panic!(),
+            27 => Self::Closure,
+            28 => Self::GetFree,
+            29 => Self::CurrentClosure,
+            _ => panic!("can't get Op from u8"),
         }
     }
 
@@ -139,7 +147,89 @@ impl Op {
         match operands.len() {
             0 => format!("Op{self:?}"),
             1 => format!("Op{self:?} {}", operands[0]),
+            2 => format!("Op{self:?} {} {}", operands[0], operands[1]),
             _ => format!("ERROR: unhandled operandCount for {self:?}"),
+        }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use crate::compiler::chunk::Instructions;
+
+    use super::Op;
+
+    fn flatten(vec: Vec<Instructions>) -> Instructions {
+        let mut res = Vec::new();
+        for mut instr in vec {
+            res.append(&mut instr.0);
+        }
+
+        Instructions::vec(res)
+    }
+
+    #[test]
+    fn read_operands_test() {
+        let tests = &[
+            (Op::Constant, vec![65535], 2),
+            (Op::GetLocal, vec![255], 1),
+            (Op::Closure, vec![65534, 253], 3),
+        ];
+
+        for test in tests {
+            let ins = test.0.make(&test.1);
+            let (operands_read, n) = test.0.read_operands(&ins[1..]);
+
+            assert_eq!(n, test.2);
+            for (i, want) in operands_read.iter().enumerate() {
+                assert_eq!(*want, test.1[i]);
+            }
+        }
+    }
+
+    #[test]
+    fn instruction_string() {
+        let tests = &[(
+            vec![
+                Instructions::vec(Op::Add.make(&[])),
+                Instructions::vec(Op::Constant.make(&[2])),
+                Instructions::vec(Op::Constant.make(&[65535])),
+                Instructions::vec(Op::GetLocal.make(&[1])),
+                Instructions::vec(Op::Closure.make(&[65534, 253])),
+            ],
+            "0000 OpAdd\n0001 OpConstant 2\n0004 OpConstant 65535\n0007 OpGetLocal 1\n0009 OpClosure 65534 253",
+        )];
+
+        for test in tests {
+            assert_eq!(flatten(test.0.clone()).to_string(), test.1);
+        }
+    }
+
+    #[test]
+    fn make_test() {
+        let tests = &[
+            (
+                Op::Constant,
+                vec![255],
+                vec![Op::Constant as u8, 0x00, 0xFF],
+            ),
+            (
+                Op::Constant,
+                vec![65534],
+                vec![Op::Constant as u8, 0xFF, 0xFE],
+            ),
+            (Op::Add, vec![], vec![Op::Add as u8]),
+            (Op::GetLocal, vec![255], vec![Op::GetLocal as u8, 0xFF]),
+            (
+                Op::Closure,
+                vec![65534, 253],
+                vec![Op::Closure as u8, 0xFF, 0xFE, 0xFD],
+            ),
+        ];
+
+        for test in tests {
+            let instruction = test.0.make(&test.1);
+            assert_eq!(instruction, test.2);
         }
     }
 }

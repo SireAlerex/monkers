@@ -40,18 +40,19 @@ pub(crate) use error;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Object {
-    Integer(i64),                                 //  8
-    Boolean(bool),                                //  1
-    String(String),                               // 24
-    Hash(HashMap<Literal, Object>),               // 48
-    Array(Vec<Object>),                           // 24
-    Returned(Box<Object>),                        //  8
-    Null,                                         //  0
-    Uninit,                                       //  0
-    Error(String),                                // 24
-    Function(Function),                           // 56
-    CompiledFunction(Instructions, usize, usize), // 24
-    Builtin(BuiltinFunction),                     //  8
+    Integer(i64),                       //  8
+    Boolean(bool),                      //  1
+    String(String),                     // 24
+    Hash(HashMap<Literal, Object>),     // 48
+    Array(Vec<Object>),                 // 24
+    Returned(Box<Object>),              //  8
+    Null,                               //  0
+    Uninit,                             //  0
+    Error(String),                      // 24
+    Function(Function),                 // 56
+    CompiledFunction(CompiledFunction), // 40
+    Closure(Closure),                   // 32
+    Builtin(BuiltinFunction),           //  8
 }
 
 pub const NULL: Object = Object::Null;
@@ -170,6 +171,7 @@ impl Object {
             Self::Uninit => panic!("Uninit object"),
             Self::Function { .. } => String::from("FUNCTION"),
             Self::CompiledFunction { .. } => String::from("COMPILED_FUNCTION"),
+            Self::Closure(_) => String::from("CLOSURE"),
             Self::Builtin(_) => String::from("BUILTIN_FUNCTION"),
             Self::Error(_) => String::from("ERROR"),
         }
@@ -209,10 +211,8 @@ impl Display for Object {
             Self::Uninit => panic!("Uninit object"),
             Self::Returned(obj) => write!(f, "{obj}"),
             Self::Function(function) => write!(f, "{function}"),
-            Self::CompiledFunction(ins, locals, params) => write!(
-                f,
-                "compiled_function: (ins={ins}, locals={locals}, params={params}"
-            ),
+            Self::CompiledFunction(func) => write!(f, "{func}"),
+            Self::Closure(closure) => write!(f, "{closure}"),
             Self::Builtin(func) => write!(f, "builtin({func:?})"),
         }
     }
@@ -283,5 +283,51 @@ impl Debug for Function {
             .field("parameters", &self.parameters)
             .field("body", &self.body)
             .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CompiledFunction {
+    pub instructions: Instructions,
+    pub locals_count: usize,
+    pub parameters_count: usize,
+}
+
+impl Display for CompiledFunction {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "CompiledFunction({} locals, {} parameters, code:\n{}",
+            self.locals_count, self.parameters_count, self.instructions
+        )
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Closure {
+    pub func: Box<CompiledFunction>,
+    pub free_variables: Vec<Object>,
+}
+
+impl Closure {
+    pub fn from_instructions(instructions: Instructions) -> Self {
+        Self {
+            func: Box::new(CompiledFunction {
+                instructions,
+                locals_count: 0,
+                parameters_count: 0,
+            }),
+            free_variables: Vec::new(),
+        }
+    }
+}
+
+impl Display for Closure {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Closure(free variables: ({:?})\n{}",
+            self.free_variables, self.func
+        )
     }
 }

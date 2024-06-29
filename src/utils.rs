@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 pub fn join<'a, T: 'a, F>(array: impl Iterator<Item = T>, f: F) -> String
 where
     F: FnMut(T) -> String,
@@ -10,7 +12,16 @@ pub const fn read_u16(ins: &[u8]) -> u16 {
 }
 
 pub fn write_u16(ins: &mut [u8], value: u64) {
-    // println!("write u16 ins:{ins:?}");
     ins[0] = (value >> 8) as u8;
     ins[1] = value as u8;
+}
+
+pub fn fmt_duration(duration: Duration) -> String {
+    if duration.as_secs() > 1 {
+        format!("{}s", duration.as_secs_f64())
+    } else if duration.as_micros() > 1 {
+        format!("{}ms", duration.as_millis())
+    } else {
+        format!("{}ns", duration.as_micros())
+    }
 }

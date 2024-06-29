@@ -9,7 +9,7 @@ use crate::{
         ast::Literal,
         evaluator::{
             builtin::BuiltinFunctions,
-            object::{Object, NULL, UNINT_OBJECT},
+            object::{Closure, CompiledFunction, Object, NULL, UNINT_OBJECT},
         },
     },
     utils,
@@ -59,25 +59,36 @@ const MAX_FRAMES: usize = 1024;
 
 #[derive(Debug, Clone)]
 pub struct Frame {
-    func: Instructions,
+    closure: Closure,
     ip: usize,
     base_pointer: usize,
 }
 
 impl Frame {
-    pub const fn new(func: Instructions, base_pointer: usize) -> Self {
+    pub const fn new(closure: Closure, base_pointer: usize) -> Self {
         Self {
-            func,
+            closure,
             ip: 0,
             base_pointer,
         }
+    }
+
+    pub const fn instructions(&self) -> &Instructions {
+        &self.closure.func.instructions
     }
 }
 
 impl Default for Frame {
     fn default() -> Self {
         Self {
-            func: Instructions::new(),
+            closure: Closure {
+                func: Box::new(CompiledFunction {
+                    instructions: Instructions::new(),
+                    locals_count: 0,
+                    parameters_count: 0,
+                }),
+                free_variables: vec![],
+            },
             ip: Default::default(),
             base_pointer: Default::default(),
         }
@@ -100,7 +111,7 @@ impl VM {
     #[allow(dead_code)]
     pub fn new(byte_code: ByteCode) -> Self {
         let mut frames = vec![Frame::default(); MAX_FRAMES];
-        let main_frame = Frame::new(byte_code.instructions, 0);
+        let main_frame = Frame::new(Closure::from_instructions(byte_code.instructions), 0);
         frames[0] = main_frame;
 
         Self {
@@ -115,7 +126,7 @@ impl VM {
 
     pub fn new_with_globals_store(byte_code: ByteCode, globals: Box<[Object]>) -> Self {
         let mut frames = vec![Frame::default(); MAX_FRAMES];
-        let main_frame = Frame::new(byte_code.instructions, 0);
+        let main_frame = Frame::new(Closure::from_instructions(byte_code.instructions), 0);
         frames[0] = main_frame;
 
         Self {
@@ -135,10 +146,10 @@ impl VM {
     // TODO check for Object::Error
     #[allow(unreachable_patterns)]
     pub fn run(&mut self) -> Result<(), String> {
-        while self.current_frame().ip < self.current_frame().func.0.len() {
+        while self.current_frame().ip < self.current_frame().instructions().0.len() {
             // let pretty_stack = self.show_stack();
             let ip = self.current_frame().ip;
-            let ins = &mut self.current_frame().func;
+            let ins = self.current_frame().instructions();
             let op: Op = Op::from_u8(ins[ip]);
             // println!("stack: {pretty_stack}\nvm run ip={} op:{:?} operands:{:?}", ip, op, op.read_operands(&ins.0[ip+1..]));
 
@@ -219,13 +230,17 @@ impl VM {
                     let args_count = self.next_byte();
 
                     match self.stack[self.sp - 1 - args_count as usize].clone() {
-                        Object::CompiledFunction(func, locals_count, params_count) => {
-                            if args_count as usize != params_count {
-                                return err!("wrong number of arguments: want={params_count}, got={args_count}");
+                        Object::Closure(closure) => {
+                            if args_count as usize != closure.func.parameters_count {
+                                return err!(
+                                    "wrong number of arguments: want={}, got={args_count}",
+                                    closure.func.parameters_count
+                                );
                             }
 
-                            let frame = Frame::new(func, self.sp - args_count as usize);
-                            self.sp = frame.base_pointer + locals_count;
+                            let base_pointer = self.sp - args_count as usize;
+                            self.sp = base_pointer + closure.func.locals_count;
+                            let frame = Frame::new(closure, base_pointer);
                             self.push_frame(frame);
                             continue;
                         }
@@ -270,6 +285,39 @@ impl VM {
                     let index = self.next_byte();
                     self.push(BuiltinFunctions::get_from_index(index as usize))?;
                 }
+                Op::Closure => {
+                    let const_index = self.next_two_bytes();
+                    let free_count = self.next_byte() as usize;
+
+                    let constant = self.constants[const_index as usize].clone();
+                    if let Object::CompiledFunction(func) = constant {
+                        let mut free_variables: Vec<Object> =
+                            Vec::with_capacity(free_count);
+                        for i in 0..free_count {
+                            let mut obj = UNINT_OBJECT;
+                            core::mem::swap(&mut obj, &mut self.stack[self.sp - free_count + i]);
+                            free_variables.insert(i, obj);
+                        }
+                        self.sp -= free_count;
+
+                        self.push(Object::Closure(Closure {
+                            func: Box::new(func),
+                            free_variables,
+                        }))?;
+                    } else {
+                        return err!("not a function: {constant:?}");
+                    }
+                }
+                Op::GetFree => {
+                    let free_index = self.next_byte();
+                    let current_closure =
+                    self.current_frame().closure.free_variables[free_index as usize].clone();
+                    self.push(current_closure)?;
+                }
+                Op::CurrentClosure => {
+                    let closure = self.current_frame().closure.clone();
+                    self.push(Object::Closure(closure))?;
+                }
                 op => err!("'{op:?}' is unimplemented for vm")?,
             }
 
@@ -308,12 +356,12 @@ impl VM {
     fn next_byte(&mut self) -> u8 {
         self.current_frame().ip += 1;
         let ip = self.current_frame().ip;
-        self.current_frame().func[ip]
+        self.current_frame().instructions()[ip]
     }
 
     fn next_two_bytes(&mut self) -> u16 {
         let start = self.current_frame().ip + 1;
-        let global_idx = utils::read_u16(&self.current_frame().func.0[start..]);
+        let global_idx = utils::read_u16(&self.current_frame().instructions().0[start..]);
         self.current_frame().ip += 2;
         global_idx
     }
@@ -344,10 +392,10 @@ impl VM {
         self.frame_index += 1;
     }
 
-    fn pop_frame(&mut self) -> Frame {
+    fn pop_frame(&mut self) -> &mut Frame {
         self.frame_index -= 1;
         // TODO &mut instead of clone ?
-        self.frames[self.frame_index].clone()
+        &mut self.frames[self.frame_index]
     }
 
     // debug function
@@ -428,6 +476,130 @@ mod test {
             hash.insert(k.into(), v.into());
         }
         Object::Hash(hash)
+    }
+
+    #[test]
+    fn fibonacci_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[(
+            "let fibonacci = fn(x) {
+                if (x == 0) {
+                return 0;
+                } else {
+                if (x == 1) {
+                return 1;
+                } else {
+                fibonacci(x - 1) + fibonacci(x - 2);
+                }
+                }
+                };
+                fibonacci(10);",
+            55,
+        )])
+    }
+
+    #[test]
+    fn recursive_function_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            (
+                "let countDown = fn(x) {
+                if (x == 0) {
+                return 0;
+                } else {
+                countDown(x - 1);
+                }
+                };
+                countDown(1);",
+                0,
+            ),
+            (
+                "let countDown = fn(x) {
+                if (x == 0) {
+                return 0;
+                } else {
+                countDown(x - 1);
+                }
+                };
+                let wrapper = fn() {
+                countDown(1);
+                };
+                wrapper();",
+                0,
+            ),
+            (
+                "let wrapper = fn() {
+                let countDown = fn(x) {
+                if (x == 0) {
+                return 0;
+                } else {
+                countDown(x - 1);
+                }
+                };
+                countDown(1);
+                };
+                wrapper();",
+                0,
+            ),
+        ])
+    }
+
+    #[test]
+    fn closure_test() -> Result<(), Box<dyn Error>> {
+        vm_test(&[
+            (
+                "let newClosure = fn(a) { fn() { a; } }; let closure = newClosure(99); closure();",
+                99,
+            ),
+            (
+                "let newAdder = fn(a, b) {
+                fn(c) { a + b + c }; };
+              let adder = newAdder(1, 2);
+              adder(8);",
+                11,
+            ),
+            (
+                "let newAdder = fn(a, b) {
+                let c = a + b;
+                fn(d) { c + d }; };
+              let adder = newAdder(1, 2);
+              adder(8);",
+                11,
+            ),
+            (
+                "let newAdderOuter = fn(a, b) {
+                let c = a + b;
+                fn(d) {
+                let e = d + c;
+                fn(f) { e + f; };
+                };
+                };
+                let newAdderInner = newAdderOuter(1, 2)
+                let adder = newAdderInner(3);
+                adder(8);",
+                14,
+            ),
+            (
+                "let a = 1;
+            let newAdderOuter = fn(b) {
+            fn(c) {
+            fn(d) { a + b + c + d };
+            };
+            };
+            let newAdderInner = newAdderOuter(2)
+            let adder = newAdderInner(3);
+            adder(8);",
+                14,
+            ),
+            (
+                "let newClosure = fn(a, b) {
+                let one = fn() { a; };
+                let two = fn() { b; };
+                fn() { one() + two(); };
+                };
+                let closure = newClosure(9, 90);
+                closure();",
+                99,
+            ),
+        ])
     }
 
     #[test]

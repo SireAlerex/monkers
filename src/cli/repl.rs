@@ -25,11 +25,12 @@ use crate::{
 };
 
 #[allow(unused_variables, unused_mut)]
-pub fn start<R: BufRead, W: Write>(input: R, mut output: W) -> Result<(), Box<dyn Error>> {
+pub fn start<R: BufRead, W: Write>(input: R, mut output: W) -> Result<Object, Box<dyn Error>> {
     let mut evaluator = Evaluator::new();
     let mut symbol_table = Rc::new(RefCell::new(SymbolTable::new()));
     let mut constants: Vec<Object> = Vec::new();
     let mut globals = (vec![UNINT_OBJECT; GLOBAL_SIZE]).into_boxed_slice();
+    let mut last_stack_top = UNINT_OBJECT;
 
     write_flush(&mut output, b">> ");
     for line in input.lines().map_while(Result::ok) {
@@ -47,6 +48,7 @@ pub fn start<R: BufRead, W: Write>(input: R, mut output: W) -> Result<(), Box<dy
         compiler.compile(program)?;
         let mut vm = VM::new_with_globals_store(compiler.byte_code(), globals);
         vm.run()?;
+        last_stack_top = vm.stack_top();
         if !matches!(vm.stack_top(), Object::Null) {
             write_flush(&mut output, format!("{}\n", vm.stack_top()).as_bytes());
         }
@@ -56,10 +58,10 @@ pub fn start<R: BufRead, W: Write>(input: R, mut output: W) -> Result<(), Box<dy
 
         write_flush(&mut output, b">> ");
     }
-    Ok(())
+    Ok(last_stack_top)
 }
 
-pub fn read<W: Write>(file_path: String, mut output: W) -> Result<(), Box<dyn Error>> {
+pub fn read<W: Write>(file_path: String, mut output: W) -> Result<Object, Box<dyn Error>> {
     let path = Path::new(&file_path);
     let source = Source::File(
         path.file_stem()
@@ -89,7 +91,7 @@ pub fn read<W: Write>(file_path: String, mut output: W) -> Result<(), Box<dyn Er
         write_flush(&mut output, format!("{}\n", vm.stack_top()).as_bytes());
     }
 
-    Ok(())
+    Ok(vm.stack_top())
 }
 
 // fn run<W: Write>(

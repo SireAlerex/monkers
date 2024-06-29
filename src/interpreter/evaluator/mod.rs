@@ -105,9 +105,11 @@ impl Evaluator {
                 BuiltinFunctions::get(&name)
                     .unwrap_or_else(|| error!("identifier not found: {name}"))
             }),
-            Expr::FunctionLiteral { parameters, body } => {
-                Object::function(parameters, body, Rc::clone(&self.env))
-            }
+            Expr::FunctionLiteral {
+                name: _,
+                parameters,
+                body,
+            } => Object::function(parameters, body, Rc::clone(&self.env)),
             Expr::Call {
                 function,
                 arguments,
