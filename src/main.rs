@@ -6,7 +6,6 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 use std::time::Instant;
 
-
 fn main() {
     let start = Instant::now();
     cli::start();

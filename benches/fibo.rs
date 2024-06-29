@@ -13,8 +13,7 @@ pub fn criterion_benchmark(c: &mut Criterion) {
     c.bench_function("fib 30", |b| b.iter(|| fibonacci(".//scripts/fibo30")));
 }
 
-
-criterion_group!{
+criterion_group! {
     name = benches;
     config = Criterion::default().sample_size(20);
     targets = criterion_benchmark

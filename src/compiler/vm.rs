@@ -73,6 +73,7 @@ impl Frame {
         }
     }
 
+    #[inline]
     pub const fn instructions(&self) -> &Instructions {
         &self.closure.func.instructions
     }
@@ -291,8 +292,7 @@ impl VM {
 
                     let constant = self.constants[const_index as usize].clone();
                     if let Object::CompiledFunction(func) = constant {
-                        let mut free_variables: Vec<Object> =
-                            Vec::with_capacity(free_count);
+                        let mut free_variables: Vec<Object> = Vec::with_capacity(free_count);
                         for i in 0..free_count {
                             let mut obj = UNINT_OBJECT;
                             core::mem::swap(&mut obj, &mut self.stack[self.sp - free_count + i]);
@@ -311,7 +311,7 @@ impl VM {
                 Op::GetFree => {
                     let free_index = self.next_byte();
                     let current_closure =
-                    self.current_frame().closure.free_variables[free_index as usize].clone();
+                        self.current_frame().closure.free_variables[free_index as usize].clone();
                     self.push(current_closure)?;
                 }
                 Op::CurrentClosure => {
@@ -353,12 +353,14 @@ impl VM {
         Object::Array(elements)
     }
 
+    #[inline]
     fn next_byte(&mut self) -> u8 {
         self.current_frame().ip += 1;
         let ip = self.current_frame().ip;
         self.current_frame().instructions()[ip]
     }
 
+    #[inline]
     fn next_two_bytes(&mut self) -> u16 {
         let start = self.current_frame().ip + 1;
         let global_idx = utils::read_u16(&self.current_frame().instructions().0[start..]);
@@ -366,12 +368,14 @@ impl VM {
         global_idx
     }
 
+    #[inline]
     fn pop(&mut self) -> Object {
         let obj = self.stack[self.sp - 1].clone();
         self.sp -= 1;
         obj
     }
 
+    #[inline]
     fn push(&mut self, obj: Object) -> Result<(), String> {
         if self.sp >= STACK_SIZE {
             Err("stack overflow".to_owned())
@@ -383,18 +387,20 @@ impl VM {
         }
     }
 
+    #[inline]
     fn current_frame(&mut self) -> &mut Frame {
         self.frames.get_mut(self.frame_index - 1).unwrap()
     }
 
+    #[inline]
     fn push_frame(&mut self, frame: Frame) {
         self.frames[self.frame_index] = frame;
         self.frame_index += 1;
     }
 
+    #[inline]
     fn pop_frame(&mut self) -> &mut Frame {
         self.frame_index -= 1;
-        // TODO &mut instead of clone ?
         &mut self.frames[self.frame_index]
     }
 

@@ -22,3 +22,6 @@ criterion = { version = "0.5.1", features = ["html_reports"] }
 name = "fibo"
 harness = false
 
+[build]
+rustflags = ["-C", "target-cpu=native"]
+
